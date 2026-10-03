@@ -1,46 +1,50 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-
-html {
-  scroll-behavior: smooth;
-}
-
+:root { --ink: #211a1d; --pink: #f14f78; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 96px; }
 body {
   margin: 0;
-  background: #ffffff;
-  color: #171717;
+  background: #f8cbd4;
+  color: var(--ink);
+  font-family: var(--font-dm-sans), Arial, sans-serif;
+}
+button, input { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+::selection { background: #f8a8bd; color: #35151e; }
+
+/* Shared focus treatment keeps every custom control keyboard-friendly. */
+:focus-visible { outline: 3px solid rgba(241, 79, 120, .35); outline-offset: 3px; }
+
+@keyframes toast-in {
+  from { transform: translate(-50%, 12px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+.toast-in { animation: toast-in 220ms ease-out; }
+
+/* Floating UI aligns with the same centered 1440px frame used by every page. */
+.frame-panel {
+  inset: 86px 12px auto 12px;
+  max-height: calc(100dvh - 100px);
+}
+.frame-fab { right: 12px; }
+
+@media (min-width: 640px) {
+  .frame-panel {
+    inset: 112px 20px auto auto;
+    width: 420px;
+    max-height: calc(100dvh - 132px);
+  }
+  .frame-fab { right: 20px; }
 }
 
-button,
-a {
-  -webkit-tap-highlight-color: transparent;
+@media (min-width: 1024px) {
+  .frame-panel { right: max(32px, calc((100vw - 1440px) / 2)); }
+  .frame-fab { right: max(32px, calc((100vw - 1440px) / 2)); }
 }
 
-button {
-  cursor: pointer;
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; }
 }

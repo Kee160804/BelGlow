@@ -1,14 +1,10 @@
-import Hero from "@/components/home/Hero";
-import Navbar from "@/components/layout/Navbar";
+import Storefront from "@/components/home/Storefront";
 
-export default function Home() {
-  return (
-    <>
-      <Navbar />
+export default async function Home({ searchParams }: PageProps<"/">) {
+  const requestedCategory = (await searchParams).category;
+  const requestedQuery = (await searchParams).q;
+  const initialCategory = typeof requestedCategory === "string" ? requestedCategory : "All";
+  const initialQuery = typeof requestedQuery === "string" ? requestedQuery : "";
 
-      <main>
-        <Hero />
-      </main>
-    </>
-  );
+  return <Storefront initialCategory={initialCategory} initialQuery={initialQuery} />;
 }
