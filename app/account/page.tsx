@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import CustomerAccount from "@/components/account/CustomerAccount";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
-  title: "My Account | BelGlow",
-  description: "Manage your BelGlow orders, saved products, and account details.",
+  title: "Shop | BelGlow",
+  description: "Browse the BelGlow beauty and self-care marketplace.",
 };
 
 export default function AccountPage() {
-  return <CustomerAccount />;
+  redirect("/shop");
 }

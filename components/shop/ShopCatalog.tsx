@@ -4,16 +4,14 @@ import { useMemo, useState } from "react";
 import { SlidersHorizontal, Sparkles } from "lucide-react";
 import SiteHeader from "@/components/layout/SiteHeader";
 import ProductCard from "@/components/products/ProductCard";
-import { products } from "@/lib/catalog";
 import { useStore } from "@/components/providers/StoreProvider";
-
-const categories = ["All", ...Array.from(new Set(products.map((product) => product.category)))];
 
 export default function ShopCatalog({ initialCategory = "All", initialQuery = "" }: { initialCategory?: string; initialQuery?: string }) {
   const [category, setCategory] = useState(initialCategory);
   const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState("recommended");
-  const { favoriteIds, recommendations } = useStore();
+  const { favoriteIds, products, recommendations } = useStore();
+  const categories = ["All", ...Array.from(new Set(products.map((product) => product.category)))];
 
   const visibleProducts = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -22,7 +20,7 @@ export default function ShopCatalog({ initialCategory = "All", initialQuery = ""
     if (sort === "low") return [...filtered].sort((a, b) => a.price - b.price);
     if (sort === "high") return [...filtered].sort((a, b) => b.price - a.price);
     return filtered;
-  }, [category, query, recommendations, sort]);
+  }, [category, products, query, recommendations, sort]);
 
   const favoriteProducts = products.filter((product) => favoriteIds.includes(product.id));
 

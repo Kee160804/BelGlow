@@ -35,6 +35,9 @@ This directory contains a migration-ready PostgreSQL design for the BelGlow mult
 
 - `migrations/20261001000000_initial_belglow_schema.sql` creates the complete schema, triggers, grants, indexes, and RLS policies.
 - `migrations/20261002000000_multivendor_marketplace.sql` adds seller onboarding, product moderation, commission splits, seller sub-orders, the balance ledger, and payouts.
+- `migrations/20261003000000_marketplace_workflows.sql` adds server-validated seller product creation, marketplace reviews, commission settings, and cart RPCs.
+- `migrations/20261005000000_admin_official_store_mode.sql` provisions the official BelGlow seller store for an admin without requiring an application.
+- `migrations/20261006000000_independent_platform_admins.sql` stores admin privileges independently from seller/customer roles and enables secure admin-account management.
 - `seed.sql` adds all current BelGlow departments, subcategories, storefront products, default variants, starter inventory, and shipping methods.
 
 ## Marketplace transaction flow
@@ -95,3 +98,17 @@ Any secret/service-role key must remain server-only and must never use the `NEXT
 3. Supabase Auth: email/password and Google sign-in; the database trigger creates the matching shopper profile and default wishlist. Seller access starts only after an approved seller application.
 
 Before production launch, add payment-provider webhook handling, refund allocation, payout-provider transfers, transactional stock reservation, tax rules, delivery-zone validation, seller identity/bank verification, and automated database/RLS tests.
+
+## Current application integration status
+
+The application now uses Supabase Auth sessions instead of its demo localStorage identity. Email/password signup and login, Google OAuth redirect, email password recovery, seller applications, listing creation/review, product catalog reads, saved local cart contents, authenticated database carts, seller order fulfillment updates, inventory updates, and role-protected admin/seller routes are connected to the existing schema.
+
+Browsing and guest checkout do not require a shopper account. Customer accounts are optional. Regular sellers use seller applications; admins do not apply or change roles. When an admin opens `/dashboard`, a protected database function automatically provisions or activates the BelGlow Official Store for that admin. The admin remains an admin, can switch between `/admin` and `/dashboard`, and can list BelGlow-owned products from the official store. Apply `20261005000000_admin_official_store_mode.sql` after previous migrations for this behavior.
+
+Platform administrator privileges are stored independently in `platform_admins`; use the admin Settings page to grant/revoke access for existing account emails. Apply `20261006000000_independent_platform_admins.sql` after the official-store migration. It preserves profile admin/staff roles and bootstraps the BelGlow owner email configured in the migration. The database prevents removal of the last administrator.
+
+Apply all migrations, including `20261003000000_marketplace_workflows.sql`, before using these screens against a Supabase project. Configure the Supabase Auth site URL and allowed redirect URLs for `/auth/callback` and `/auth/update-password`. Enable Google in Supabase Auth before offering that provider. Promote the first BelGlow administrator through a trusted Supabase SQL session; never allow users to select their own `admin` role.
+
+The checkout page intentionally does not create orders or claim payments succeeded. The exact payment processor was not provided, and a Belize merchant needs a provider confirmed to support the platform's country, BZD or chosen settlement currency, marketplace split/commission collection, verified webhooks, refunds, and seller payouts. Do not accept real orders until that provider-specific integration is implemented and tested. The same external payout integration is required before money can be sent to sellers. See `.env.example` for the public and provider configuration variable names; actual credentials belong only in the ignored local `.env` or deployment secret store.
+
+The seller and admin order/payout views can display existing database records, but some advanced operations (refunds, shipping labels, automated transfers, full tax calculation, and notification delivery) still require provider and business-policy configuration.

@@ -60,10 +60,10 @@ export default function SiteHeader({
     }
     if (userRole === "admin") router.push("/admin");
     else if (userRole === "seller") router.push("/dashboard");
-    else router.push("/account");
+    else router.push("/shop");
   }
 
-  const accountLabel = userRole === "admin" ? "Admin dashboard" : userRole === "seller" ? "Seller dashboard" : userName ? "My account" : "Sign in or create account";
+  const accountLabel = userRole === "admin" ? "Admin dashboard" : userRole === "seller" ? "Seller dashboard" : userName ? "Shop marketplace" : "Sign in or create account";
 
   function isActiveNavigation(href: string) {
     if (href === "/") return pathname === "/" && activeHash !== "#about" && activeHash !== "#blog";

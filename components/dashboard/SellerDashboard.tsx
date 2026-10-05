@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/components/providers/StoreProvider";
+import SellerProductManager from "@/components/dashboard/SellerProductManager";
+import SellerOperations from "@/components/dashboard/SellerOperations";
+import SellerOverview from "@/components/dashboard/SellerOverview";
 
 const navigation = [
   { label: "Dashboard", href: "/dashboard", icon: House },
@@ -64,14 +67,15 @@ export default function SellerDashboard() {
     };
   }, []);
 
-  if (!userName || userRole !== "seller") {
+  if (!userName || (userRole !== "seller" && userRole !== "admin")) {
     return <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,#fff7f4,#f5e8e3_48%,#ead8d2)] p-5">
       <section className="w-full max-w-lg rounded-[32px] border border-white/70 bg-white/90 p-8 text-center shadow-[0_30px_90px_rgba(87,48,42,.16)] sm:p-11">
         <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-[#f7e3df] text-[#b85f5d]"><Store size={30} /></span>
         <p className="mt-6 text-xs font-bold uppercase tracking-[.24em] text-[#b85f5d]">Seller access</p>
         <h1 className="mt-2 font-serif text-4xl font-semibold tracking-[-.03em]">Run your beauty business on BelGlow</h1>
-        <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-[#74696a]">Sign in with the seller demo to preview products, orders, inventory, commission, and payouts.</p>
-        <button onClick={openAuth} className="mt-7 w-full rounded-xl bg-[#bf6d68] px-5 py-3.5 font-bold text-white transition hover:bg-[#a95956]">Sign in to seller dashboard</button>
+        <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-[#74696a]">Sign in and apply to sell. Once BelGlow approves your seller store, you can upload products, manage stock, and fulfill orders here.</p>
+        <button onClick={openAuth} className="mt-7 w-full rounded-xl bg-[#bf6d68] px-5 py-3.5 font-bold text-white transition hover:bg-[#a95956]">Sign in to apply to sell</button>
+        <Link href="/seller-application" className="mt-3 block text-sm font-bold text-[#a95b58] underline">Apply to sell with this account</Link>
         <Link href="/" className="mt-4 inline-block text-sm font-semibold text-[#7a5a58] hover:text-[#b85f5d]">Return to marketplace</Link>
       </section>
     </main>;
@@ -87,9 +91,10 @@ export default function SellerDashboard() {
         <nav className="mt-7 space-y-1" aria-label="Seller navigation">
           {navigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.label} href={item.href} onClick={() => setMenuOpen(false)} aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${active ? "bg-[#dca9a2] text-white shadow-sm" : "text-[#393438] hover:bg-[#f3e7e3]"}`}><Icon size={19} /><span className="flex-1">{item.label}</span>{"badge" in item && <span className={`rounded-md px-1.5 py-0.5 text-xs ${active ? "bg-white/25 text-white" : "bg-[#c88e85] text-white"}`}>{item.badge}</span>}</Link>; })}
         </nav>
+        {userRole === "admin" && <Link href="/admin" className="mt-5 flex items-center justify-center rounded-xl border border-[#d8aaa3] bg-white px-3 py-2.5 text-sm font-bold text-[#a95b58]">Switch to platform admin</Link>}
         <div className="mt-auto rounded-2xl border border-[#eadbd6] bg-white/70 p-4">
-          <p className="text-sm font-bold">BelGlow marketplace</p>
-          <p className="mt-1 text-xs leading-5 text-[#75696b]">A 15% platform fee is deducted from each completed sale.</p>
+          <p className="text-sm font-bold">{userRole === "admin" ? "BelGlow Official Store" : "Seller storefront"}</p>
+          <p className="mt-1 text-xs leading-5 text-[#75696b]">{userRole === "admin" ? "Manage and sell BelGlow-owned products from your official store." : "A 15% platform fee is deducted from each completed sale."}</p>
           <button onClick={signOut} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-[#d8aaa3] py-2 text-xs font-bold text-[#a95b58]"><LogOut size={15} /> Sign out</button>
         </div>
       </aside>
@@ -105,12 +110,11 @@ export default function SellerDashboard() {
             <div ref={accountMenuRef} className="relative">
               <button onClick={() => setAccountMenuOpen((open) => !open)} aria-expanded={accountMenuOpen} aria-controls="seller-account-menu" className="flex items-center gap-3 rounded-xl px-1.5 py-1.5 text-left transition hover:bg-[#f7efec] sm:pr-3">
                 <span className="grid h-10 w-10 place-items-center rounded-full bg-[#ead0ca] font-serif text-lg text-[#a95b58]">G</span>
-                <span className="hidden sm:block"><span className="block text-sm font-bold">{userName}</span><span className="block text-[11px] text-[#7e7274]">Seller account</span></span>
+                <span className="hidden sm:block"><span className="block text-sm font-bold">{userName}</span><span className="block text-[11px] text-[#7e7274]">{userRole === "admin" ? "BelGlow Official Store" : "Seller account"}</span></span>
                 <ChevronDown size={16} className={`transition-transform ${accountMenuOpen ? "rotate-180" : ""}`} />
               </button>
               {accountMenuOpen && <div id="seller-account-menu" className="absolute right-0 top-[calc(100%+10px)] z-50 w-64 overflow-hidden rounded-2xl border border-[#eadeda] bg-white p-2 shadow-[0_18px_50px_rgba(73,43,39,.18)]">
-                <div className="border-b border-[#eee5e1] px-3 py-3 sm:hidden"><p className="text-sm font-bold">{userName}</p><p className="text-xs text-[#7e7274]">Seller account</p></div>
-                <Link href="/dashboard/store-profile" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold hover:bg-[#f8f1ef]"><Store size={18} className="text-[#a95b58]" /> Store profile</Link>
+                <div className="border-b border-[#eee5e1] px-3 py-3 sm:hidden"><p className="text-sm font-bold">{userName}</p><p className="text-xs text-[#7e7274]">{userRole === "admin" ? "BelGlow Official Store" : "Seller account"}</p></div>
                 <Link href="/" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold hover:bg-[#f8f1ef]"><ShoppingBag size={18} className="text-[#a95b58]" /> View marketplace</Link>
                 <button onClick={() => { setAccountMenuOpen(false); signOut(); }} className="mt-1 flex w-full items-center gap-3 border-t border-[#eee5e1] px-3 py-3 text-left text-sm font-bold text-[#b24f4b] hover:bg-[#fff2f1]"><LogOut size={18} /> Sign out</button>
               </div>}
@@ -118,7 +122,9 @@ export default function SellerDashboard() {
           </div>
         </header>
 
-        {pathname === "/dashboard" ? <div className="p-4 sm:p-7 lg:p-8">
+        {pathname === "/dashboard" ? <SellerOverview userName={userName} /> : <SectionWorkspace section={pathname.split("/").filter(Boolean).at(-1) ?? "dashboard"} />}
+        {/* Legacy visual dashboard retained below as a non-rendered reference during migration. */}
+        {false && pathname === "/dashboard" ? <div className="p-4 sm:p-7 lg:p-8">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div><p className="text-sm text-[#8b7877]">Thursday, October 1</p><h1 className="mt-1 font-serif text-3xl font-semibold tracking-[-.025em] sm:text-4xl">Good morning, {userName} <span aria-hidden>👋</span></h1><p className="mt-1 text-[#695f62]">Here&apos;s what&apos;s happening with your store today.</p></div>
             <Link href="/dashboard/add-product" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#bf6d68] px-5 py-3 font-bold text-white shadow-[0_10px_24px_rgba(191,109,104,.22)]"><Plus size={20} /> Add product</Link>
@@ -145,7 +151,7 @@ export default function SellerDashboard() {
             <section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm"><SectionTitle title="Top products" href="/dashboard/products" /> <div className="mt-3 divide-y divide-[#eee5e1]">{topProducts.map((product) => <div key={product[0]} className="flex items-center gap-3 py-2.5"><ProductThumb position={product[3]} /><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{product[0]}</p><p className="text-[11px] text-[#857a7c]">{product[1]}</p></div><p className="text-xs font-bold">{product[2]}</p></div>)}</div></section>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1"><section className="rounded-2xl bg-[linear-gradient(135deg,#eed3cb,#dca7a0)] p-5"><p className="text-xs font-bold uppercase tracking-[.16em] text-[#8e524f]">Grow your store</p><h2 className="mt-2 font-serif text-2xl font-semibold">List your next bestseller</h2><p className="mt-2 text-xs leading-5 text-[#695354]">Add products and reach beauty shoppers across Belize.</p><Link href="/dashboard/add-product" className="mt-5 inline-block rounded-lg border border-[#a95d58] bg-white/75 px-4 py-2 text-xs font-bold text-[#9c5552]">Add new product</Link></section><section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm"><SectionTitle title="Payout" href="/dashboard/payouts" /><p className="mt-5 text-xs text-[#786e70]">Available balance</p><p className="mt-1 font-serif text-3xl font-bold">BZ$1,245.00</p><p className="mt-2 flex items-center gap-1 text-xs font-semibold text-emerald-700"><CircleDollarSign size={14} /> After commission</p><Link href="/dashboard/payouts" className="mt-4 block w-full rounded-xl bg-[#bf6d68] py-3 text-center text-sm font-bold text-white">View payout details</Link></section></div>
           </div>
-        </div> : <SectionWorkspace section={pathname.split("/").filter(Boolean).at(-1) ?? "dashboard"} />}
+        </div> : null}
       </div>
     </div>
   </main>;
@@ -177,15 +183,15 @@ function SectionWorkspace({ section }: { section: string }) {
 }
 
 function renderSection(section: string) {
-  if (section === "products") return <ProductsPage />;
-  if (section === "add-product") return <AddProductPage />;
-  if (section === "orders") return <OrdersPage />;
-  if (section === "inventory") return <InventoryPage />;
+  if (section === "products") return <SellerProductManager mode="list" />;
+  if (section === "add-product") return <SellerProductManager mode="create" />;
+  if (section === "orders") return <SellerOperations workspace="orders" />;
+  if (section === "inventory") return <SellerOperations workspace="inventory" />;
   if (section === "customers") return <CustomersPage />;
   if (section === "reviews") return <ReviewsPage />;
   if (section === "promotions") return <PromotionsPage />;
   if (section === "analytics") return <AnalyticsPage />;
-  if (section === "payouts") return <PayoutsPage />;
+  if (section === "payouts") return <SellerOperations workspace="payouts" />;
   if (section === "store-profile") return <StoreProfilePage />;
   return <SettingsPage />;
 }
@@ -196,10 +202,6 @@ const sellerProducts = [
   ["Nourishing Body Oil", "Body care", "86", "5", "BZ$13.00", "Low stock", "84% center"],
   ["Aloe & Shea Body Lotion", "Body care", "64", "8", "BZ$12.00", "Active", "66% center"],
 ] as const;
-
-function ProductsPage() { return <Panel><Toolbar placeholder="Search your products" filter="All products" /><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><TableHead labels={["Product", "Category", "Sold", "Stock", "Price", "Status"]} /><tbody>{sellerProducts.map((product) => <tr key={product[0]} className="border-t border-[#eee5e1]"><td className="flex items-center gap-3 px-4 py-3"><ProductThumb position={product[6]} /><strong>{product[0]}</strong></td><td className="px-4 text-[#6f6568]">{product[1]}</td><td className="px-4">{product[2]}</td><td className="px-4">{product[3]}</td><td className="px-4 font-semibold">{product[4]}</td><td className="px-4"><span className={`rounded-full px-2.5 py-1 text-xs ${product[5] === "Low stock" ? "bg-orange-50 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>{product[5]}</span></td></tr>)}</tbody></table></div></Panel>; }
-
-function AddProductPage() { return <form onSubmit={(event) => event.preventDefault()} className="grid gap-5 xl:grid-cols-[1.3fr_.7fr]"><Panel><h2 className="text-lg font-bold">Product details</h2><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Product name" placeholder="e.g. Hibiscus Glow Oil" wide /><Field label="Category" placeholder="Choose a category" /><Field label="Price (BZD)" placeholder="0.00" /><Field label="SKU" placeholder="BG-0001" /><Field label="Available quantity" placeholder="0" /><label className="sm:col-span-2 text-sm font-semibold">Description<textarea rows={6} placeholder="Tell customers what makes this product special..." className="mt-2 w-full rounded-xl border border-[#ddd3d0] bg-[#fcfaf9] p-4 font-normal outline-none focus:border-[#bf6d68]" /></label></div></Panel><div className="space-y-5"><Panel><h2 className="text-lg font-bold">Product image</h2><button type="button" className="mt-4 grid min-h-48 w-full place-items-center rounded-2xl border border-dashed border-[#d9b8b2] bg-[#fbf3f1] text-center text-[#9b5a57]"><span><Plus className="mx-auto" /><strong className="mt-2 block text-sm">Upload product photos</strong><span className="mt-1 block text-xs text-[#817477]">PNG or JPG up to 10 MB</span></span></button></Panel><Panel><label className="flex items-center justify-between gap-3 text-sm font-semibold">Publish immediately<input type="checkbox" defaultChecked className="h-5 w-5 accent-[#bf6d68]" /></label><button className="mt-5 w-full rounded-xl bg-[#bf6d68] py-3 font-bold text-white">Publish product</button><button type="button" className="mt-2 w-full rounded-xl border border-[#d9c2bd] py-3 text-sm font-bold text-[#9b5a57]">Save as draft</button></Panel></div></form>; }
 
 function OrdersPage() { return <Panel><div className="grid gap-3 sm:grid-cols-3"><MiniStat label="Open orders" value="40" /><MiniStat label="Ready to ship" value="12" /><MiniStat label="Completed this month" value="86" /></div><div className="mt-5"><Toolbar placeholder="Search order or customer" filter="All statuses" /></div><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><TableHead labels={["Order", "Customer", "Items", "Total", "Status", "Date"]} /><tbody>{recentOrders.map((order) => <tr key={order[0]} className="border-t border-[#eee5e1]"><td className="px-4 py-4 font-semibold text-[#ad5d59] underline">{order[0]}</td><td className="px-4">{order[1]}</td><td className="px-4">{order[2]}</td><td className="px-4 font-semibold">{order[3]}</td><td className="px-4"><StatusBadge status={order[4]} /></td><td className="px-4 text-[#70676a]">{order[5]}</td></tr>)}</tbody></table></div></Panel>; }
 

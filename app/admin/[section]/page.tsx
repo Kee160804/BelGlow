@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import AdminDashboard from "@/components/admin/AdminDashboard";
+import { requireAdmin } from "@/lib/auth";
 
 const sections = ["sellers", "approvals", "orders", "commission", "payouts", "customers", "settings"] as const;
 
@@ -13,5 +14,6 @@ export async function generateMetadata({ params }: PageProps<"/admin/[section]">
 export default async function AdminSectionPage({ params }: PageProps<"/admin/[section]">) {
   const { section } = await params;
   if (!sections.includes(section as (typeof sections)[number])) notFound();
+  await requireAdmin();
   return <AdminDashboard />;
 }

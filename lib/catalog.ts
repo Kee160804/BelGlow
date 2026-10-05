@@ -77,21 +77,34 @@ export const homeCategories = [
   { name: "Bath & Beauty", count: 24, position: "center" },
 ] as const;
 
-export const products = [
-  { id: 1, name: "Pink Peptide Serum", category: "Skincare", rating: "4.8 (320)", price: 28, position: "29% center" },
-  { id: 2, name: "Tropical Body Butter", category: "Body Care", rating: "4.7 (210)", price: 24, position: "66% center" },
-  { id: 3, name: "Moringa Curl Cream", category: "Hair Care", rating: "4.9 (184)", price: 22, position: "50% center" },
-  { id: 4, name: "Island Bloom Body Mist", category: "Fragrance", rating: "4.8 (365)", price: 20, position: "84% center" },
-  { id: 5, name: "Petal Shine Lip Gloss", category: "Cosmetics", rating: "4.6 (146)", price: 14, position: "31% center" },
-  { id: 6, name: "Coconut Shower Oil", category: "Bath & Beauty", rating: "4.7 (118)", price: 19, position: "58% center" },
-  { id: 7, name: "Aloe & Turmeric Glow Oil", category: "Natural & Herbal Care", rating: "4.9 (252)", price: 26, position: "29% center" },
-  { id: 8, name: "BelGlow Self-Care Set", category: "Sets & Bundles", rating: "4.9 (96)", price: 48, position: "center" },
-  { id: 9, name: "Brightening Face Cleanser", category: "Skincare", rating: "4.7 (288)", price: 18, position: "50% center" },
-  { id: 10, name: "Cocoa Glow Body Oil", category: "Body Care", rating: "4.8 (174)", price: 21, position: "84% center" },
-  { id: 11, name: "Castor Scalp Treatment", category: "Hair Care", rating: "4.8 (203)", price: 24, position: "29% center" },
-  { id: 12, name: "Wild Orchid Perfume Oil", category: "Fragrance", rating: "4.9 (132)", price: 32, position: "31% center" },
-  { id: 13, name: "Belize Sunset Blush", category: "Cosmetics", rating: "4.6 (89)", price: 16, position: "66% center" },
-  { id: 14, name: "Pink Hibiscus Bath Salts", category: "Bath & Beauty", rating: "4.8 (102)", price: 17, position: "58% center" },
-  { id: 15, name: "Gentle Baby Aloe Lotion", category: "Baby & Gentle Care", rating: "4.9 (77)", price: 15, position: "84% center" },
-  { id: 16, name: "Rose Quartz Facial Roller", category: "Beauty Accessories", rating: "4.7 (141)", price: 25, position: "center" },
-] as const;
+export type StoreProduct = {
+  id: string;
+  slug: string;
+  name: string;
+  category: string;
+  rating: string;
+  price: number;
+  position: string;
+  description?: string;
+  imageUrl?: string;
+  variantId?: string;
+};
+
+export const products: StoreProduct[] = [
+  { id: "demo-1", slug: "pink-peptide-serum", name: "Pink Peptide Serum", category: "Skincare", rating: "4.8 (320)", price: 28, position: "29% center" },
+  { id: "demo-2", slug: "tropical-body-butter", name: "Tropical Body Butter", category: "Body Care", rating: "4.7 (210)", price: 24, position: "66% center" },
+  { id: "demo-3", slug: "moringa-curl-cream", name: "Moringa Curl Cream", category: "Hair Care", rating: "4.9 (184)", price: 22, position: "50% center" },
+  { id: "demo-4", slug: "island-bloom-body-mist", name: "Island Bloom Body Mist", category: "Fragrance", rating: "4.8 (365)", price: 20, position: "84% center" },
+  { id: "demo-5", slug: "petal-shine-lip-gloss", name: "Petal Shine Lip Gloss", category: "Cosmetics", rating: "4.6 (146)", price: 14, position: "31% center" },
+  { id: "demo-6", slug: "coconut-shower-oil", name: "Coconut Shower Oil", category: "Bath & Beauty", rating: "4.7 (118)", price: 19, position: "58% center" },
+  { id: "demo-7", slug: "aloe-turmeric-glow-oil", name: "Aloe & Turmeric Glow Oil", category: "Natural & Herbal Care", rating: "4.9 (252)", price: 26, position: "29% center" },
+  { id: "demo-8", slug: "belglow-self-care-set", name: "BelGlow Self-Care Set", category: "Sets & Bundles", rating: "4.9 (96)", price: 48, position: "center" },
+  { id: "demo-9", slug: "brightening-face-cleanser", name: "Brightening Face Cleanser", category: "Skincare", rating: "4.7 (288)", price: 18, position: "50% center" },
+  { id: "demo-10", slug: "cocoa-glow-body-oil", name: "Cocoa Glow Body Oil", category: "Body Care", rating: "4.8 (174)", price: 21, position: "84% center" },
+  { id: "demo-11", slug: "castor-scalp-treatment", name: "Castor Scalp Treatment", category: "Hair Care", rating: "4.8 (203)", price: 24, position: "29% center" },
+  { id: "demo-12", slug: "wild-orchid-perfume-oil", name: "Wild Orchid Perfume Oil", category: "Fragrance", rating: "4.9 (132)", price: 32, position: "31% center" },
+  { id: "demo-13", slug: "belize-sunset-blush", name: "Belize Sunset Blush", category: "Cosmetics", rating: "4.6 (89)", price: 16, position: "66% center" },
+  { id: "demo-14", slug: "pink-hibiscus-bath-salts", name: "Pink Hibiscus Bath Salts", category: "Bath & Beauty", rating: "4.8 (102)", price: 17, position: "58% center" },
+  { id: "demo-15", slug: "gentle-baby-aloe-lotion", name: "Gentle Baby Aloe Lotion", category: "Baby & Gentle Care", rating: "4.9 (77)", price: 15, position: "84% center" },
+  { id: "demo-16", slug: "rose-quartz-facial-roller", name: "Rose Quartz Facial Roller", category: "Beauty Accessories", rating: "4.7 (141)", price: 25, position: "center" },
+];

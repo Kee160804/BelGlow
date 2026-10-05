@@ -6,7 +6,7 @@ import {
   ArrowRight, ChevronRight, Leaf, ShieldCheck, Sparkles,
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
-import { homeCategories, products } from "@/lib/catalog";
+import { homeCategories } from "@/lib/catalog";
 import SiteHeader from "@/components/layout/SiteHeader";
 import ProductCard from "@/components/products/ProductCard";
 import { useStore } from "@/components/providers/StoreProvider";
@@ -15,7 +15,7 @@ export default function Storefront({ initialCategory = "All", initialQuery = "" 
   const [category, setCategory] = useState(initialCategory);
   const [query, setQuery] = useState(initialQuery);
   const [toast, setToast] = useState("");
-  const { recommendations } = useStore();
+  const { products, recommendations } = useStore();
 
   // Search and category state intentionally share one filtered result set.
   const visibleProducts = useMemo(() => {
@@ -26,7 +26,7 @@ export default function Storefront({ initialCategory = "All", initialQuery = "" 
       return matchesCategory && matchesQuery;
     });
     return category === "All" && !needle ? recommendations.slice(0, 4) : matches;
-  }, [category, query, recommendations]);
+  }, [category, products, query, recommendations]);
 
   function showToast(message: string) {
     setToast(message);
