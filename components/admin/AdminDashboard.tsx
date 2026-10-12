@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowUpRight, Bell, Check, CircleDollarSign, Clock, Download,
-  LayoutDashboard, LogOut, Menu, PackageCheck, Percent, Search, Settings,
+  FolderTree, LayoutDashboard, LogOut, Menu, PackageCheck, Percent, Search, Settings,
   ShieldCheck, ShoppingBag, Store, TrendingUp, UserPlus, Users,
   WalletCards, X,
 } from "lucide-react";
 import { FormEvent, ReactNode, useState } from "react";
 import { useStore } from "@/components/providers/StoreProvider";
 import AdminMarketplaceTools from "@/components/admin/AdminMarketplaceTools";
+import DashboardSwitcher from "@/components/dashboard/DashboardSwitcher";
 
 type AdminModal = {
   kind: "seller" | "approval" | "order" | "commission" | "payout" | "add-seller" | "customer" | "settings";
@@ -26,6 +27,7 @@ const adminNavigation = [
   ["Commission", "/admin/commission", Percent],
   ["Seller payouts", "/admin/payouts", WalletCards],
   ["Customers", "/admin/customers", Users],
+  ["Categories", "/admin/categories", FolderTree],
   ["Settings", "/admin/settings", Settings],
 ] as const;
 
@@ -60,8 +62,10 @@ const customers = [
   ["Kayla Ramirez", "4", "BZ$199.50", "Sep 30, 2026", "Active"],
 ] as const;
 
-export default function AdminDashboard() {
-  const { userName, userRole, openAuth, signOut } = useStore();
+export default function AdminDashboard({ initialUserName }: { initialUserName: string }) {
+  const { userName: liveUserName, userRole: liveUserRole, openAuth, signOut } = useStore();
+  const userName = liveUserName ?? initialUserName;
+  const userRole = liveUserRole ?? "admin";
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -106,9 +110,9 @@ export default function AdminDashboard() {
     return <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,#fff7f4,#eaded9_55%,#dfcdc7)] p-5"><section className="w-full max-w-lg rounded-[32px] bg-white p-9 text-center shadow-[0_28px_80px_rgba(69,39,34,.18)]"><span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-[#2d2528] text-white"><ShieldCheck size={30} /></span><p className="mt-6 text-xs font-bold uppercase tracking-[.22em] text-[#a95855]">Restricted access</p><h1 className="mt-2 font-serif text-4xl font-semibold">BelGlow administration</h1><p className="mt-4 text-sm leading-6 text-[#74696b]">Only BelGlow platform administrators can manage sellers, approvals, commission, and payouts.</p><button onClick={openAuth} className="mt-7 w-full rounded-xl bg-[#2d2528] py-3.5 font-bold text-white">Sign in as administrator</button><Link href="/" className="mt-4 inline-block text-sm font-semibold text-[#9f5754]">Return to marketplace</Link></section></main>;
   }
 
-  return <main className="min-h-screen bg-[#e9dfdb] p-0 text-[#292527] lg:p-5">
-    <div className="mx-auto grid min-h-screen max-w-[1600px] overflow-hidden bg-[#f8f5f3] shadow-[0_26px_90px_rgba(61,39,35,.16)] lg:min-h-[calc(100vh-40px)] lg:grid-cols-[250px_1fr] lg:rounded-[28px]">
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col bg-[#292326] p-5 text-white transition-transform lg:static lg:w-auto lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+  return <main className="h-screen overflow-hidden bg-[#e9dfdb] p-0 text-[#292527] lg:p-5">
+    <div className="mx-auto grid h-screen min-h-0 max-w-[1600px] overflow-hidden bg-[#f8f5f3] shadow-[0_26px_90px_rgba(61,39,35,.16)] lg:h-[calc(100vh-40px)] lg:grid-cols-[250px_1fr] lg:rounded-[28px]">
+      <aside className={`fixed inset-y-0 left-0 z-50 flex h-full w-[280px] flex-col overflow-hidden bg-[#292326] p-5 text-white transition-transform lg:static lg:w-auto lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between"><Link href="/" className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#e4b4ad] text-[#652e2d]"><ShieldCheck size={23} /></span><span><strong className="block font-serif text-2xl">BelGlow</strong><small className="text-[9px] uppercase tracking-[.2em] text-[#d4c7c8]">Platform admin</small></span></Link><button onClick={() => setMenuOpen(false)} className="p-2 lg:hidden" aria-label="Close admin navigation"><X /></button></div>
         <nav className="mt-8 space-y-1" aria-label="Admin navigation">{adminNavigation.map(([label, href, Icon]) => { const active = pathname === href; return <Link key={href} href={href} onClick={() => { setMenuOpen(false); setQuery(""); }} aria-current={active ? "page" : undefined} className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition ${active ? "bg-[#c8726b] text-white" : "text-[#ddd3d4] hover:bg-white/8 hover:text-white"}`}><Icon size={19} /><span className="flex-1">{label}</span>{label === "Product approvals" && pendingApprovals.length > 0 && <span className="rounded-full bg-[#e6aaa2] px-2 py-0.5 text-[10px] font-bold text-[#542422]">{pendingApprovals.length}</span>}</Link>; })}</nav>
         <div className="mt-auto rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-xs leading-5 text-[#d4c7c8]">Admin actions affect every seller and customer on BelGlow.</p><button onClick={signOut} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-white/10 py-2.5 text-sm font-bold hover:bg-white/15"><LogOut size={16} /> Sign out</button></div>
@@ -116,13 +120,14 @@ export default function AdminDashboard() {
 
       {menuOpen && <button className="fixed inset-0 z-40 bg-black/30 lg:hidden" onClick={() => setMenuOpen(false)} aria-label="Close admin navigation overlay" />}
 
-      <div className="min-w-0">
-        <header className="relative flex h-20 items-center gap-3 border-b border-[#e8dedb] bg-white px-4 sm:px-7">
+      <div className="h-full min-h-0 min-w-0 overflow-y-auto">
+        <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-[#e8dedb] bg-white/95 px-4 sm:px-7">
           <button onClick={() => setMenuOpen(true)} className="rounded-xl border border-[#e1d5d1] p-2.5 lg:hidden" aria-label="Open admin navigation"><Menu size={20} /></button>
+          <DashboardSwitcher role="admin" />
           <label className="hidden max-w-xl flex-1 items-center gap-3 rounded-xl bg-[#f3efed] px-4 sm:flex"><Search size={18} /><span className="sr-only">Search current admin page</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search this section..." className="h-11 flex-1 bg-transparent text-sm outline-none" /></label>
           <div className="ml-auto flex items-center gap-2">
             <div className="relative"><button onClick={() => { setNotificationsOpen((open) => !open); setAccountOpen(false); }} aria-expanded={notificationsOpen} className="relative rounded-full p-2" aria-label="Admin notifications"><Bell size={20} />{pendingApprovals.length > 0 && <span className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />}</button>{notificationsOpen && <div className="absolute right-0 top-12 z-50 w-72 rounded-2xl border border-[#e8dedb] bg-white p-3 shadow-2xl"><p className="px-2 py-1 text-sm font-bold">Notifications</p>{pendingApprovals.length > 0 ? <Notification text={`${pendingApprovals.length} products need approval`} href="/admin/approvals" onClick={() => setNotificationsOpen(false)} /> : <p className="px-2 py-3 text-sm text-[#776d70]">No pending product approvals.</p>}<Notification text="5 payouts are ready" href="/admin/payouts" onClick={() => setNotificationsOpen(false)} /><button onClick={() => { setNotificationsOpen(false); showNotice("All notifications marked as read"); }} className="mt-2 w-full rounded-xl bg-[#f6efed] py-2 text-xs font-bold text-[#a45653]">Mark all as read</button></div>}</div>
-            <div className="relative"><button onClick={() => { setAccountOpen((open) => !open); setNotificationsOpen(false); }} aria-expanded={accountOpen} className="flex items-center gap-3 rounded-xl p-1.5 text-left hover:bg-[#f6f0ee]"><span className="grid h-10 w-10 place-items-center rounded-full bg-[#292326] font-serif text-white">A</span><span className="hidden sm:block"><strong className="block text-sm">{userName}</strong><small className="text-[#7c7174]">Administrator</small></span></button>{accountOpen && <div className="absolute right-0 top-14 z-50 w-56 rounded-2xl border border-[#e8dedb] bg-white p-2 shadow-2xl"><Link href="/dashboard" onClick={() => setAccountOpen(false)} className="block rounded-xl px-3 py-2.5 text-sm font-semibold text-[#9b514f] hover:bg-[#f6efed]">Switch to seller</Link><Link href="/admin" onClick={() => setAccountOpen(false)} className="block rounded-xl px-3 py-2.5 text-sm font-semibold hover:bg-[#f6efed]">Stay in admin mode</Link><Link href="/" onClick={() => setAccountOpen(false)} className="block rounded-xl px-3 py-2.5 text-sm font-semibold hover:bg-[#f6efed]">View marketplace</Link><Link href="/admin/settings" onClick={() => setAccountOpen(false)} className="block rounded-xl px-3 py-2.5 text-sm font-semibold hover:bg-[#f6efed]">Admin settings</Link><button onClick={signOut} className="mt-1 flex w-full items-center gap-2 border-t border-[#eee5e2] px-3 py-3 text-left text-sm font-bold text-[#aa4f4c]"><LogOut size={16} /> Sign out</button></div>}</div>
+            <div className="relative"><button onClick={() => { setAccountOpen((open) => !open); setNotificationsOpen(false); }} aria-expanded={accountOpen} className="flex items-center gap-3 rounded-xl p-1.5 text-left hover:bg-[#f6f0ee]"><span className="grid h-10 w-10 place-items-center rounded-full bg-[#292326] font-serif text-white">A</span><span className="hidden sm:block"><strong className="block text-sm">{userName}</strong><small className="text-[#7c7174]">Administrator</small></span></button>{accountOpen && <div className="absolute right-0 top-14 z-50 w-56 rounded-2xl border border-[#e8dedb] bg-white p-2 shadow-2xl"><Link href="/admin/settings" onClick={() => setAccountOpen(false)} className="block rounded-xl px-3 py-2.5 text-sm font-semibold hover:bg-[#f6efed]">Manage administrators</Link><button onClick={signOut} className="mt-1 flex w-full items-center gap-2 border-t border-[#eee5e2] px-3 py-3 text-left text-sm font-bold text-[#aa4f4c]"><LogOut size={16} /> Sign out</button></div>}</div>
           </div>
         </header>
 
@@ -140,17 +145,17 @@ function AdminOverview({ openModal, commissionRate, approvalRows }: { openModal:
 }
 
 function AdminSection({ section, query, setQuery, openModal, commissionRate, approvalRows, payoutRows, onExport, onNotice }: { section: string; query: string; setQuery: (value: string) => void; openModal: (modal: AdminModal) => void; commissionRate: number; approvalRows: ReadonlyArray<ReadonlyArray<string>>; payoutRows: ReadonlyArray<ReadonlyArray<string>>; onExport: (name: string, headings: readonly string[], rows: ReadonlyArray<ReadonlyArray<string>>) => void; onNotice: (message: string) => void }) {
-  const names: Record<string, string> = { sellers: "Sellers", approvals: "Product approvals", orders: "Marketplace orders", commission: "Commission", payouts: "Seller payouts", customers: "Customers", settings: "Platform settings" };
+  const names: Record<string, string> = { sellers: "Sellers", approvals: "Product approvals", orders: "Marketplace orders", commission: "Commission", payouts: "Seller payouts", customers: "Customers", categories: "Store categories", settings: "Platform settings" };
   return <><p className="text-xs font-bold uppercase tracking-[.2em] text-[#ac5d59]">BelGlow administration</p><h1 className="mt-2 font-serif text-4xl font-semibold">{names[section] ?? "Administration"}</h1><p className="mt-2 text-sm text-[#716669]">{sectionDescription(section)}</p><div className="mt-7">{sectionContent({ section, query, setQuery, openModal, commissionRate, approvalRows, payoutRows, onExport, onNotice })}</div></>;
 }
 
 function sectionDescription(section: string) {
-  const descriptions: Record<string, string> = { sellers: "Approve accounts, review performance, and manage seller access.", approvals: "Review new marketplace listings before they become visible to shoppers.", orders: "Monitor every order placed across all BelGlow sellers.", commission: "Track the platform percentage earned from completed marketplace sales.", payouts: "Review and release seller balances after commission and refunds.", customers: "Support shoppers and review marketplace activity.", settings: "Control marketplace rules, commission, and operational preferences." };
+  const descriptions: Record<string, string> = { sellers: "Approve accounts, review performance, and manage seller access.", approvals: "Review new marketplace listings before they become visible to shoppers.", orders: "Monitor every order placed across all BelGlow sellers.", commission: "Track the platform percentage earned from completed marketplace sales.", payouts: "Review and release seller balances after commission and refunds.", customers: "Support shoppers and review marketplace activity.", categories: "Control the category catalog used by sellers and the public store.", settings: "Control marketplace rules, commission, and operational preferences." };
   return descriptions[section] ?? "Manage the BelGlow marketplace.";
 }
 
 function sectionContent({ section, query, setQuery, openModal, commissionRate, approvalRows, payoutRows, onExport, onNotice }: { section: string; query: string; setQuery: (value: string) => void; openModal: (modal: AdminModal) => void; commissionRate: number; approvalRows: ReadonlyArray<ReadonlyArray<string>>; payoutRows: ReadonlyArray<ReadonlyArray<string>>; onExport: (name: string, headings: readonly string[], rows: ReadonlyArray<ReadonlyArray<string>>) => void; onNotice: (message: string) => void }) {
-  if (["sellers", "approvals", "commission", "orders", "payouts", "customers", "settings"].includes(section)) return <AdminMarketplaceTools section={section as "sellers" | "approvals" | "commission" | "orders" | "payouts" | "customers" | "settings"} />;
+  if (["sellers", "approvals", "commission", "orders", "payouts", "customers", "categories", "settings"].includes(section)) return <AdminMarketplaceTools section={section as "sellers" | "approvals" | "commission" | "orders" | "payouts" | "customers" | "categories" | "settings"} />;
   if (section === "sellers") return <Card><AdminToolbar query={query} setQuery={setQuery} placeholder="Search sellers" action="Add seller" icon={<UserPlus size={16} />} onAction={() => openModal({ kind: "add-seller", title: "Invite a seller", detail: "Create a seller invitation and choose their initial access." })} /><SellerTable query={query} onManage={(name) => openModal({ kind: "seller", title: name, detail: "Review store performance, permissions, and account status." })} /></Card>;
   if (section === "approvals") return <Card><AdminToolbar query={query} setQuery={setQuery} placeholder="Search pending products" action="Review queue" onAction={() => approvalRows[0] ? openModal({ kind: "approval", title: approvalRows[0][0], detail: "Work through all products waiting for marketplace approval." }) : onNotice("The approval queue is clear")} /><ApprovalTable rows={approvalRows} query={query} onReview={(name) => openModal({ kind: "approval", title: name, detail: "Review product content, pricing, images, and marketplace policy compliance." })} /></Card>;
   if (section === "orders") return <Card><AdminToolbar query={query} setQuery={setQuery} placeholder="Search marketplace orders" action="Export orders" icon={<Download size={16} />} onAction={() => onExport("belglow-orders", ["Order", "Customer", "Seller", "Total", "Platform fee", "Status"], orders)} /><SimpleRows query={query} headings={["Order", "Customer", "Seller", "Total", "Platform fee", "Status"]} rows={orders} actionLabel="Open" onAction={(row) => openModal({ kind: "order", title: row[0], detail: `${row[1]} ordered from ${row[2]} for ${row[3]}.` })} /></Card>;

@@ -8,6 +8,6 @@ export const metadata: Metadata = {
 };
 
 export default async function DashboardPage() {
-  await requireSeller();
-  return <SellerDashboard />;
+  const current = await requireSeller();
+  return <SellerDashboard accountRole={current.profile.role === "admin" ? "admin" : "seller"} initialUserName={current.profile.full_name || current.user.email?.split("@")[0] || "Seller"} />;
 }

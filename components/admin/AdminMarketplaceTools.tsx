@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, CircleDollarSign, Clock, PackageCheck, Store, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import AdminAccessManager from "@/components/admin/AdminAccessManager";
+import AdminCategoryManager from "@/components/admin/AdminCategoryManager";
 
-type Section = "overview" | "sellers" | "approvals" | "commission" | "orders" | "payouts" | "customers" | "settings";
+type Section = "overview" | "sellers" | "approvals" | "commission" | "orders" | "payouts" | "customers" | "categories" | "settings";
 type SellerRow = { id: string; name: string; slug: string; status: string; created_at: string; rejection_reason: string | null };
 type ProductRow = { id: string; name: string; seller_store_id: string; base_price_cents: number; submitted_at: string | null };
 type OrderRow = { id: string; order_number: number; email: string; total_cents: number; payment_status: string; fulfillment_status: string; created_at: string };
@@ -158,6 +159,8 @@ export default function AdminMarketplaceTools({ section }: { section: Section })
     {section === "payouts" && !loading && <section className="rounded-2xl border border-[#e9dfdc] bg-white p-5"><h2 className="text-lg font-bold">Seller payouts</h2><p className="mt-2 text-sm text-[#756a6d]">Payout records are read-only until a Belize-supported marketplace payout provider is configured.</p>{payouts.length ? <div className="mt-4 divide-y divide-[#eee5e1]">{payouts.map((payout) => <article key={payout.id} className="flex justify-between gap-4 py-4"><div><p className="font-semibold">{storeNames.get(payout.seller_store_id) ?? "Seller"}</p><p className="text-xs text-[#817679]">{payout.status} · {new Date(payout.created_at).toLocaleDateString()}</p></div><strong>BZ${(payout.net_payout_cents / 100).toFixed(2)}</strong></article>)}</div> : <p className="mt-4 text-sm text-[#756a6d]">No payout records yet.</p>}</section>}
 
     {section === "customers" && !loading && <section className="rounded-2xl border border-[#e9dfdc] bg-white p-5"><h2 className="text-lg font-bold">Customer accounts</h2><p className="mt-2 text-sm text-[#756a6d]">{customerCount} customer profiles are stored in BelGlow.</p></section>}
+
+    {section === "categories" && !loading && <AdminCategoryManager />}
 
     {section === "settings" && !loading && <div className="grid gap-5 xl:grid-cols-2"><section className="max-w-xl rounded-2xl border border-[#e9dfdc] bg-white p-6"><h2 className="text-lg font-bold">Seller onboarding</h2><p className="mt-2 text-sm leading-6 text-[#756a6d]">Control whether customers may submit new seller applications.</p><label className="mt-5 flex items-center justify-between gap-4 text-sm font-semibold">Accept seller applications<input type="checkbox" checked={applicationsOpen} disabled={busyId === "settings"} onChange={(event) => void updateApplicationsOpen(event.target.checked)} className="h-5 w-5 accent-[#b85f5d]" /></label></section><AdminAccessManager /></div>}
   </div>;

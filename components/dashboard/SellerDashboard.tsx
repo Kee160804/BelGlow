@@ -13,6 +13,7 @@ import { useStore } from "@/components/providers/StoreProvider";
 import SellerProductManager from "@/components/dashboard/SellerProductManager";
 import SellerOperations from "@/components/dashboard/SellerOperations";
 import SellerOverview from "@/components/dashboard/SellerOverview";
+import DashboardSwitcher from "@/components/dashboard/DashboardSwitcher";
 
 const navigation = [
   { label: "Dashboard", href: "/dashboard", icon: House },
@@ -43,8 +44,10 @@ const topProducts = [
   ["Aloe & Shea Body Lotion", "64 sold", "BZ$768.00", "66% center"],
 ] as const;
 
-export default function SellerDashboard() {
-  const { userName, userRole, openAuth, signOut } = useStore();
+export default function SellerDashboard({ accountRole, initialUserName }: { accountRole: "seller" | "admin"; initialUserName: string }) {
+  const { userName: liveUserName, userRole: liveUserRole, openAuth, signOut } = useStore();
+  const userName = liveUserName ?? initialUserName;
+  const userRole = liveUserRole ?? accountRole;
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -81,9 +84,9 @@ export default function SellerDashboard() {
     </main>;
   }
 
-  return <main className="min-h-screen bg-[#efe4df] p-0 text-[#292527] lg:p-5">
-    <div className="mx-auto grid min-h-screen max-w-[1600px] overflow-hidden bg-[#faf7f5] shadow-[0_26px_90px_rgba(76,46,40,.16)] lg:min-h-[calc(100vh-40px)] lg:grid-cols-[244px_1fr] lg:rounded-[28px]">
-      <aside className={`fixed inset-y-0 left-0 z-50 flex w-[270px] flex-col border-r border-[#eadeda] bg-[#fbf6f3] p-5 transition-transform lg:static lg:w-auto lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+  return <main className="h-screen overflow-hidden bg-[#efe4df] p-0 text-[#292527] lg:p-5">
+    <div className="mx-auto grid h-screen min-h-0 max-w-[1600px] overflow-hidden bg-[#faf7f5] shadow-[0_26px_90px_rgba(76,46,40,.16)] lg:h-[calc(100vh-40px)] lg:grid-cols-[244px_1fr] lg:rounded-[28px]">
+      <aside className={`fixed inset-y-0 left-0 z-50 flex h-full w-[270px] flex-col overflow-hidden border-r border-[#eadeda] bg-[#fbf6f3] p-5 transition-transform lg:static lg:w-auto lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between px-2 py-2">
           <Link href="/" className="flex items-center gap-2" aria-label="BelGlow marketplace"><BrandMark /><div><p className="font-serif text-3xl leading-none">Bel<span className="text-[#b86160]">Glow</span></p><p className="mt-1 text-[7px] font-bold uppercase tracking-[.26em] text-[#9b6461]">Beauty beyond borders</p></div></Link>
           <button onClick={() => setMenuOpen(false)} className="rounded-full p-2 lg:hidden" aria-label="Close navigation"><X size={21} /></button>
@@ -91,7 +94,6 @@ export default function SellerDashboard() {
         <nav className="mt-7 space-y-1" aria-label="Seller navigation">
           {navigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.label} href={item.href} onClick={() => setMenuOpen(false)} aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${active ? "bg-[#dca9a2] text-white shadow-sm" : "text-[#393438] hover:bg-[#f3e7e3]"}`}><Icon size={19} /><span className="flex-1">{item.label}</span>{"badge" in item && <span className={`rounded-md px-1.5 py-0.5 text-xs ${active ? "bg-white/25 text-white" : "bg-[#c88e85] text-white"}`}>{item.badge}</span>}</Link>; })}
         </nav>
-        {userRole === "admin" && <Link href="/admin" className="mt-5 flex items-center justify-center rounded-xl border border-[#d8aaa3] bg-white px-3 py-2.5 text-sm font-bold text-[#a95b58]">Switch to platform admin</Link>}
         <div className="mt-auto rounded-2xl border border-[#eadbd6] bg-white/70 p-4">
           <p className="text-sm font-bold">{userRole === "admin" ? "BelGlow Official Store" : "Seller storefront"}</p>
           <p className="mt-1 text-xs leading-5 text-[#75696b]">{userRole === "admin" ? "Manage and sell BelGlow-owned products from your official store." : "A 15% platform fee is deducted from each completed sale."}</p>
@@ -101,9 +103,10 @@ export default function SellerDashboard() {
 
       {menuOpen && <button className="fixed inset-0 z-40 bg-black/25 lg:hidden" onClick={() => setMenuOpen(false)} aria-label="Close navigation overlay" />}
 
-      <div className="min-w-0">
-        <header className="flex h-20 items-center gap-3 border-b border-[#ebe1dd] bg-white/80 px-4 backdrop-blur sm:px-7">
+      <div className="h-full min-h-0 min-w-0 overflow-y-auto">
+        <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-[#ebe1dd] bg-white/90 px-4 backdrop-blur sm:px-7">
           <button onClick={() => setMenuOpen(true)} className="rounded-xl border border-[#eadeda] p-2.5 lg:hidden" aria-label="Open navigation"><Menu size={20} /></button>
+          <DashboardSwitcher role={accountRole} />
           <label className="hidden max-w-xl flex-1 items-center gap-3 rounded-xl bg-[#f4f0ee] px-4 sm:flex"><Search size={19} className="text-[#666064]" /><span className="sr-only">Search dashboard</span><input placeholder="Search products, orders, customers..." className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
             <button className="relative rounded-full p-2" aria-label="Notifications"><Bell size={20} /><span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" /></button>
@@ -115,8 +118,7 @@ export default function SellerDashboard() {
               </button>
               {accountMenuOpen && <div id="seller-account-menu" className="absolute right-0 top-[calc(100%+10px)] z-50 w-64 overflow-hidden rounded-2xl border border-[#eadeda] bg-white p-2 shadow-[0_18px_50px_rgba(73,43,39,.18)]">
                 <div className="border-b border-[#eee5e1] px-3 py-3 sm:hidden"><p className="text-sm font-bold">{userName}</p><p className="text-xs text-[#7e7274]">{userRole === "admin" ? "BelGlow Official Store" : "Seller account"}</p></div>
-                <Link href="/" onClick={() => setAccountMenuOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold hover:bg-[#f8f1ef]"><ShoppingBag size={18} className="text-[#a95b58]" /> View marketplace</Link>
-                <button onClick={() => { setAccountMenuOpen(false); signOut(); }} className="mt-1 flex w-full items-center gap-3 border-t border-[#eee5e1] px-3 py-3 text-left text-sm font-bold text-[#b24f4b] hover:bg-[#fff2f1]"><LogOut size={18} /> Sign out</button>
+                <button onClick={() => { setAccountMenuOpen(false); signOut(); }} className="flex w-full items-center gap-3 px-3 py-3 text-left text-sm font-bold text-[#b24f4b] hover:bg-[#fff2f1]"><LogOut size={18} /> Sign out</button>
               </div>}
             </div>
           </div>

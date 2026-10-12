@@ -8,6 +8,6 @@ export const metadata: Metadata = {
 };
 
 export default async function AdminPage() {
-  await requireAdmin();
-  return <AdminDashboard />;
+  const current = await requireAdmin();
+  return <AdminDashboard initialUserName={current.profile.full_name || current.user.email?.split("@")[0] || "Administrator"} />;
 }

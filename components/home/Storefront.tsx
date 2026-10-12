@@ -6,27 +6,32 @@ import {
   ArrowRight, ChevronRight, Leaf, ShieldCheck, Sparkles,
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
-import { homeCategories } from "@/lib/catalog";
 import SiteHeader from "@/components/layout/SiteHeader";
 import ProductCard from "@/components/products/ProductCard";
 import { useStore } from "@/components/providers/StoreProvider";
+import { useMarketplaceCategories } from "@/components/categories/useMarketplaceCategories";
+import { categoryChildren, rootCategories } from "@/lib/marketplace-categories";
 
 export default function Storefront({ initialCategory = "All", initialQuery = "" }: { initialCategory?: string; initialQuery?: string }) {
   const [category, setCategory] = useState(initialCategory);
   const [query, setQuery] = useState(initialQuery);
   const [toast, setToast] = useState("");
   const { products, recommendations } = useStore();
+  const { categories } = useMarketplaceCategories();
+  const homeCategories = rootCategories(categories).slice(0, 6);
 
   // Search and category state intentionally share one filtered result set.
   const visibleProducts = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const matches = products.filter((product) => {
-      const matchesCategory = category === "All" || product.category === category;
+      const selected = categories.find((item) => item.name === category);
+      const categoryNames = selected ? [selected.name, ...categoryChildren(categories, selected.id).map((item) => item.name)] : [category];
+      const matchesCategory = category === "All" || categoryNames.includes(product.category);
       const matchesQuery = !needle || `${product.name} ${product.category}`.toLowerCase().includes(needle);
       return matchesCategory && matchesQuery;
     });
     return category === "All" && !needle ? recommendations.slice(0, 4) : matches;
-  }, [category, products, query, recommendations]);
+  }, [categories, category, products, query, recommendations]);
 
   function showToast(message: string) {
     setToast(message);
@@ -54,19 +59,23 @@ export default function Storefront({ initialCategory = "All", initialQuery = "" 
         <section id="categories" className="px-5 py-9 sm:px-10 lg:px-16">
           <SectionHeading title="Shop by Category" action="View all" href="/categories" />
           <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            {homeCategories.map((item) => (
+            {homeCategories.map((item, index) => {
+              const names = [item.name, ...categoryChildren(categories, item.id).map((child) => child.name)];
+              const count = products.filter((product) => names.includes(product.category)).length;
+              const positions = ["18% 50%", "35% 50%", "50% 50%", "65% 50%", "80% 50%", "92% 50%"];
+              return (
               <button key={item.name} onClick={() => chooseCategory(item.name)} aria-pressed={category === item.name}
                 className={`group overflow-hidden rounded-2xl border text-left transition duration-300 hover:-translate-y-1 hover:shadow-lg ${category === item.name ? "border-[#f14f78] shadow-md" : "border-[#f1e2e7]"}`}>
                 <div className="relative h-24 overflow-hidden bg-[#fce1e8] sm:h-28">
                   <Image src="/images/belglow-hero-products.png" alt="" fill sizes="(max-width: 640px) 50vw, 16vw"
-                    className="scale-[1.7] object-cover transition duration-500 group-hover:scale-[1.82]" style={{ objectPosition: item.position }} />
+                    className="scale-[1.7] object-cover transition duration-500 group-hover:scale-[1.82]" style={{ objectPosition: positions[index] }} />
                 </div>
                 <div className="bg-white px-3 py-3 text-center">
                   <p className="text-sm font-bold">{item.name}</p>
-                  <p className="mt-0.5 text-xs text-[#887b80]">{item.count} products</p>
+                  <p className="mt-0.5 text-xs text-[#887b80]">{count} {count === 1 ? "product" : "products"}</p>
                 </div>
               </button>
-            ))}
+            );})}
           </div>
         </section>
 

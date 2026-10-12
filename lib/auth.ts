@@ -9,7 +9,7 @@ export async function getCurrentProfile() {
   if (authError || !user) return null;
 
   const [{ data: profile, error }, { data: hasAdminAccess }] = await Promise.all([
-    supabase.from("profiles").select("role, full_name").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("role, full_name, phone").eq("id", user.id).maybeSingle(),
     supabase.rpc("is_admin"),
   ]);
 
@@ -46,6 +46,6 @@ export async function requireAdmin() {
   const current = await getCurrentProfile();
   if (!current) redirect("/?login=required");
   if (current.profile.role !== "admin" && current.profile.role !== "staff")
-    redirect("/");
+    redirect("/account");
   return current;
 }

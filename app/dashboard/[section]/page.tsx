@@ -17,6 +17,6 @@ export async function generateMetadata({ params }: PageProps<"/dashboard/[sectio
 export default async function SellerSectionPage({ params }: PageProps<"/dashboard/[section]">) {
   const { section } = await params;
   if (!sections.includes(section as (typeof sections)[number])) notFound();
-  await requireSeller();
-  return <SellerDashboard />;
+  const current = await requireSeller();
+  return <SellerDashboard accountRole={current.profile.role === "admin" ? "admin" : "seller"} initialUserName={current.profile.full_name || current.user.email?.split("@")[0] || "Seller"} />;
 }

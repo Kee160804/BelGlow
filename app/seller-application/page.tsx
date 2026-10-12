@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/utils/supabase/server";
@@ -20,7 +21,8 @@ export default async function SellerApplicationPage() {
       {store ? <div className="mt-7 rounded-2xl bg-[#fff5f2] p-5 text-sm leading-6 text-[#705b59]" role="status">
         <strong>{store.name}</strong> — application {store.status}.
         {store.rejection_reason && <p className="mt-2">Review note: {store.rejection_reason}</p>}
-      </div> : <SellerApplicationForm />}
+      </div> : <SellerApplicationForm accountEmail={current.user.email ?? ""} accountPhone={current.profile.phone ?? ""} />}
+      <Link href="/account" className="mt-5 flex w-full items-center justify-center rounded-xl border border-[#d8c1bd] bg-white px-5 py-3.5 text-sm font-bold text-[#9b5754] transition hover:border-[#bf6d68] hover:bg-[#fff8f6]">Back to customer dashboard</Link>
     </section>
   </main>;
 }

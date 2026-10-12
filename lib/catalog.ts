@@ -87,7 +87,16 @@ export type StoreProduct = {
   position: string;
   description?: string;
   imageUrl?: string;
+  imageUrls?: string[];
   variantId?: string;
+  subtitle?: string;
+  ingredients?: string;
+  usageInstructions?: string;
+  shippingInfo?: string;
+  sellerName?: string;
+  compareAtPrice?: number;
+  stock?: number;
+  variants?: Array<{ id: string; name: string; price: number; stock: number }>;
 };
 
 export const products: StoreProduct[] = [

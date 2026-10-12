@@ -3,10 +3,11 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Heart, Mail, Minus, ShoppingBag, Sparkles, Store, UserRound, X } from "lucide-react";
 import { products, type StoreProduct } from "@/lib/catalog";
 import { createClient } from "@/utils/supabase/client";
+import ProductPreviewModal from "@/components/products/ProductPreviewModal";
 
 type AccountRole = "shopper" | "seller" | "admin";
 
@@ -17,14 +18,16 @@ type StoreUser = {
   role: AccountRole;
 };
 
+export type StoreCartItem = { productId: string; variantId?: string; optionName?: string; price?: number };
+
 type StoreContextValue = {
-  cart: string[];
+  cart: StoreCartItem[];
   favoriteIds: string[];
   products: ReadonlyArray<StoreProduct>;
   recommendations: ReadonlyArray<StoreProduct>;
   userName: string | null;
   userRole: AccountRole | null;
-  addToCart: (id: string) => void;
+  addToCart: (id: string, variantId?: string) => void;
   toggleFavorite: (id: string) => void;
   openProduct: (id: string) => void;
   trackProduct: (id: string) => void;
@@ -38,10 +41,11 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [cart, setCart] = useState<string[]>([]);
-  const [cartLoaded, setCartLoaded] = useState(false);
+  const [cart, setCart] = useState<StoreCartItem[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
-  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+  const [wishlistId, setWishlistId] = useState<string | null>(null);
+  const guestCartRef = useRef<StoreCartItem[]>([]);
+  const guestFavoritesRef = useRef<string[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<StoreProduct[]>(products);
   const [interest, setInterest] = useState<Record<string, number>>({});
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
@@ -53,6 +57,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const userName = currentUser?.name ?? null;
   const userRole = currentUser?.role ?? null;
   const blockingOverlay = selectedProductId !== null || cartOpen || wishlistOpen || authOpen;
+
+  function clearPrivateShoppingState() {
+    guestCartRef.current = [];
+    guestFavoritesRef.current = [];
+    setCart([]);
+    setFavoriteIds([]);
+    setWishlistId(null);
+  }
+
+  useEffect(() => {
+    // Guest shopping data is intentionally session-only. Remove values left by
+    // older builds that persisted guest carts and favorites in localStorage.
+    window.localStorage.removeItem("belglow-cart");
+    window.localStorage.removeItem("belglow-favorites");
+  }, []);
 
   useEffect(() => {
     const supabase = createClient();
@@ -71,7 +90,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) {
-        if (active) setCurrentUser(null);
+        if (active) {
+          setCurrentUser(null);
+          clearPrivateShoppingState();
+        }
         return;
       }
       void loadProfile(user.id, user.email ?? "", user.user_metadata ?? {});
@@ -80,6 +102,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session?.user) {
         setCurrentUser(null);
+        clearPrivateShoppingState();
         return;
       }
       // Defer Supabase queries outside the auth callback to avoid blocking its lock.
@@ -98,46 +121,66 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     async function loadCatalog() {
       const { data: rows, error } = await supabase.from("products")
-        .select("id, slug, name, short_description, base_price_cents")
+        .select("id, seller_store_id, slug, name, short_description, description, ingredients, usage_instructions, attributes, base_price_cents, compare_at_price_cents")
         .eq("status", "active")
         .order("created_at", { ascending: false });
       if (error || !rows?.length || !active) return;
 
       const ids = rows.map((row) => row.id);
-      const [categoriesResult, linksResult, variantsResult, imagesResult, reviewsResult] = await Promise.all([
+      const storeIds = [...new Set(rows.map((row) => row.seller_store_id).filter((id): id is string => Boolean(id)))];
+      const [categoriesResult, linksResult, variantsResult, imagesResult, reviewsResult, storesResult] = await Promise.all([
         supabase.from("categories").select("id, name").eq("is_active", true),
         supabase.from("product_categories").select("product_id, category_id").in("product_id", ids).eq("is_primary", true),
-        supabase.from("product_variants").select("id, product_id, price_cents").in("product_id", ids).eq("is_active", true).order("sort_order"),
-        supabase.from("product_images").select("product_id, storage_path").in("product_id", ids).eq("is_primary", true),
+        supabase.from("product_variants").select("id, product_id, name, price_cents").in("product_id", ids).eq("is_active", true).order("sort_order"),
+        supabase.from("product_images").select("product_id, storage_path, is_primary, sort_order").in("product_id", ids).order("sort_order"),
         supabase.from("reviews").select("product_id, rating").in("product_id", ids).eq("is_approved", true),
+        storeIds.length ? supabase.from("seller_stores").select("id, name").in("id", storeIds) : Promise.resolve({ data: [] }),
       ]);
       if (!active) return;
 
       const categoryNames = new Map((categoriesResult.data ?? []).map((row) => [row.id, row.name]));
       const categoryByProduct = new Map((linksResult.data ?? []).map((row) => [row.product_id, categoryNames.get(row.category_id) ?? "Beauty"]));
-      const variantByProduct = new Map<string, { id: string; price_cents: number | null }>();
-      for (const variant of variantsResult.data ?? []) if (!variantByProduct.has(variant.product_id)) variantByProduct.set(variant.product_id, variant);
-      const imageByProduct = new Map((imagesResult.data ?? []).map((row) => [row.product_id, row.storage_path]));
+      const variantRows = variantsResult.data ?? [];
+      const variantIds = variantRows.map((variant) => variant.id);
+      const { data: inventoryRows } = variantIds.length ? await supabase.from("inventory_levels").select("variant_id, quantity_on_hand, quantity_reserved").in("variant_id", variantIds) : { data: [] };
+      const stockByVariant = new Map<string, number>();
+      for (const level of inventoryRows ?? []) stockByVariant.set(level.variant_id, (stockByVariant.get(level.variant_id) ?? 0) + Math.max(0, level.quantity_on_hand - level.quantity_reserved));
+      const variantsByProduct = new Map<string, Array<{ id: string; name: string; price: number; stock: number }>>();
+      for (const variant of variantRows) variantsByProduct.set(variant.product_id, [...(variantsByProduct.get(variant.product_id) ?? []), { id: variant.id, name: variant.name, price: Number(variant.price_cents ?? 0) / 100, stock: stockByVariant.get(variant.id) ?? 0 }]);
+      const imagesByProduct = new Map<string, Array<{ storage_path: string; is_primary: boolean }>>();
+      for (const image of imagesResult.data ?? []) imagesByProduct.set(image.product_id, [...(imagesByProduct.get(image.product_id) ?? []), image]);
       const ratings = new Map<string, number[]>();
       for (const review of reviewsResult.data ?? []) ratings.set(review.product_id, [...(ratings.get(review.product_id) ?? []), review.rating]);
+      const storeNames = new Map((storesResult.data ?? []).map((store) => [store.id, store.name]));
 
       const liveProducts = rows.map((row) => {
-        const variant = variantByProduct.get(row.id);
+        const productVariants = variantsByProduct.get(row.id) ?? [];
+        const variant = productVariants[0];
         const reviewScores = ratings.get(row.id) ?? [];
         const averageRating = reviewScores.length ? reviewScores.reduce((total, rating) => total + rating, 0) / reviewScores.length : null;
-        const imagePath = imageByProduct.get(row.id);
-        const imageUrl = imagePath ? supabase.storage.from("product-images").getPublicUrl(imagePath).data.publicUrl : undefined;
+        const productImages = [...(imagesByProduct.get(row.id) ?? [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
+        const imageUrls = productImages.map((image) => supabase.storage.from("product-images").getPublicUrl(image.storage_path).data.publicUrl);
+        const imageUrl = imageUrls[0];
         return {
           id: row.id,
           slug: row.slug,
           name: row.name,
           category: categoryByProduct.get(row.id) ?? "Beauty",
           rating: averageRating === null ? "New" : `${averageRating.toFixed(1)} (${reviewScores.length})`,
-          price: Number(variant?.price_cents ?? row.base_price_cents) / 100,
+          price: variant?.price ?? Number(row.base_price_cents) / 100,
           position: "center",
-          description: row.short_description ?? undefined,
+          description: row.description ?? row.short_description ?? undefined,
           imageUrl,
+          imageUrls,
           variantId: variant?.id,
+          subtitle: typeof row.attributes?.subtitle === "string" ? row.attributes.subtitle : row.short_description ?? undefined,
+          ingredients: row.ingredients ?? undefined,
+          usageInstructions: row.usage_instructions ?? undefined,
+          shippingInfo: typeof row.attributes?.shipping_info === "string" ? row.attributes.shipping_info : undefined,
+          sellerName: row.seller_store_id ? storeNames.get(row.seller_store_id) : "BelGlow",
+          compareAtPrice: row.compare_at_price_cents ? Number(row.compare_at_price_cents) / 100 : undefined,
+          stock: productVariants.reduce((total, option) => total + option.stock, 0),
+          variants: productVariants,
         } satisfies StoreProduct;
       });
       setCatalogProducts(liveProducts);
@@ -150,68 +193,77 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const supabase = createClient();
     let active = true;
-    let timer: number | undefined;
 
     if (!currentUser) {
-      timer = window.setTimeout(() => {
-        try {
-          const saved: unknown = JSON.parse(window.localStorage.getItem("belglow-cart") ?? "[]");
-          if (active && Array.isArray(saved)) setCart(saved.filter((id): id is string => typeof id === "string"));
-        } catch {
-          window.localStorage.removeItem("belglow-cart");
-        }
-        if (active) setCartLoaded(true);
-      }, 0);
+      return () => { active = false; };
     } else {
       const currentUserId = currentUser.id;
       async function hydrateSignedInCart() {
-        const savedGuestCart: string[] = (() => {
-          try {
-            const saved: unknown = JSON.parse(window.localStorage.getItem("belglow-cart") ?? "[]");
-            return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : [];
-          } catch { return []; }
-        })();
-        for (const id of savedGuestCart) {
-          const product = catalogProducts.find((item) => item.id === id);
-          if (product?.variantId) await supabase.rpc("add_cart_item", { target_variant_id: product.variantId, quantity_delta: 1 });
+        const savedGuestCart = guestCartRef.current;
+        for (const item of savedGuestCart) {
+          const product = catalogProducts.find((productItem) => productItem.id === item.productId);
+          const targetVariantId = item.variantId ?? product?.variantId;
+          if (targetVariantId) await supabase.rpc("add_cart_item", { target_variant_id: targetVariantId, quantity_delta: 1 });
         }
-        window.localStorage.removeItem("belglow-cart");
+        guestCartRef.current = [];
 
         const { data: activeCart } = await supabase.from("carts").select("id").eq("user_id", currentUserId).eq("status", "active").maybeSingle();
         if (activeCart) {
           const { data: items } = await supabase.from("cart_items").select("variant_id, quantity").eq("cart_id", activeCart.id);
-          const idByVariant = new Map(catalogProducts.filter((product) => product.variantId).map((product) => [product.variantId!, product.id]));
-          const expanded = (items ?? []).flatMap((item) => Array.from({ length: item.quantity }, () => idByVariant.get(item.variant_id)).filter((id): id is string => Boolean(id)));
+          const detailsByVariant = new Map(catalogProducts.flatMap((product) => (product.variants ?? []).map((variant) => [variant.id, { productId: product.id, variantId: variant.id, optionName: variant.name, price: variant.price }] as const)));
+          const expanded: StoreCartItem[] = [];
+          for (const item of items ?? []) {
+            const details = detailsByVariant.get(item.variant_id);
+            if (details) for (let index = 0; index < item.quantity; index += 1) expanded.push(details);
+          }
           if (active) setCart(expanded);
         } else if (active) setCart([]);
-        if (active) setCartLoaded(true);
       }
       void hydrateSignedInCart();
     }
-    return () => {
-      active = false;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
+    return () => { active = false; };
   }, [currentUser, catalogProducts]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      try {
-        const saved: unknown = JSON.parse(window.localStorage.getItem("belglow-favorites") ?? "[]");
-        if (Array.isArray(saved)) setFavoriteIds(saved.filter((id): id is string => typeof id === "string"));
+    const supabase = createClient();
+    let active = true;
+
+    if (!currentUser) {
+      return () => { active = false; };
+    }
+
+    async function hydrateSignedInWishlist() {
+      let { data: wishlist } = await supabase
+        .from("wishlists")
+        .select("id")
+        .eq("user_id", currentUser!.id)
+        .eq("is_default", true)
+        .maybeSingle();
+
+      if (!wishlist) {
+        const result = await supabase.from("wishlists").insert({ user_id: currentUser!.id, name: "Saved products", is_default: true }).select("id").single();
+        wishlist = result.data;
       }
-      catch { window.localStorage.removeItem("belglow-favorites"); }
-      setFavoritesLoaded(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+      if (!wishlist || !active) return;
 
-  useEffect(() => {
-    if (!cartLoaded) return;
-    if (!currentUser) window.localStorage.setItem("belglow-cart", JSON.stringify(cart));
-  }, [cart, cartLoaded, currentUser]);
+      const guestProductIds = guestFavoritesRef.current.filter(isDatabaseId);
+      if (guestProductIds.length) {
+        await supabase.from("wishlist_items").upsert(
+          guestProductIds.map((productId) => ({ wishlist_id: wishlist.id, product_id: productId })),
+          { onConflict: "wishlist_id,product_id", ignoreDuplicates: true },
+        );
+      }
 
-  useEffect(() => { if (favoritesLoaded) window.localStorage.setItem("belglow-favorites", JSON.stringify(favoriteIds)); }, [favoriteIds, favoritesLoaded]);
+      const { data: items } = await supabase.from("wishlist_items").select("product_id").eq("wishlist_id", wishlist.id);
+      if (!active) return;
+      guestFavoritesRef.current = [];
+      setWishlistId(wishlist.id);
+      setFavoriteIds((items ?? []).map((item) => item.product_id));
+    }
+
+    void hydrateSignedInWishlist();
+    return () => { active = false; };
+  }, [currentUser]);
 
   // Lock page scrolling while a modal or framed panel owns the interaction focus.
   useEffect(() => {
@@ -251,15 +303,48 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }
 
   function toggleFavorite(id: string) {
-    setFavoriteIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+    const shouldSave = !favoriteIds.includes(id);
+    const nextFavorites = shouldSave ? [...favoriteIds, id] : favoriteIds.filter((item) => item !== id);
+    setFavoriteIds(nextFavorites);
+    if (!currentUser) {
+      guestFavoritesRef.current = nextFavorites;
+      if (shouldSave) showNotice("Saved for this visit. Sign in to keep it for later.");
+    }
+    else if (isDatabaseId(id)) void persistWishlistChange(id, shouldSave);
     trackProduct(id);
   }
 
-  function addToCart(id: string) {
-    setCart((current) => [...current, id]);
+  async function persistWishlistChange(productId: string, shouldSave: boolean) {
+    if (!currentUser) return;
+    const supabase = createClient();
+    let targetWishlistId = wishlistId;
+    if (!targetWishlistId) {
+      const { data } = await supabase.from("wishlists").select("id").eq("user_id", currentUser.id).eq("is_default", true).maybeSingle();
+      targetWishlistId = data?.id ?? null;
+      if (targetWishlistId) setWishlistId(targetWishlistId);
+    }
+    if (!targetWishlistId) {
+      showNotice("Your saved-products list is still loading. Please try again.");
+      return;
+    }
+
+    const result = shouldSave
+      ? await supabase.from("wishlist_items").upsert({ wishlist_id: targetWishlistId, product_id: productId }, { onConflict: "wishlist_id,product_id", ignoreDuplicates: true })
+      : await supabase.from("wishlist_items").delete().eq("wishlist_id", targetWishlistId).eq("product_id", productId);
+    if (result.error) showNotice("We couldnâ€™t update your saved products. Please try again.");
+  }
+
+  function addToCart(id: string, variantId?: string) {
     const product = catalogProducts.find((item) => item.id === id);
-    if (currentUser && product?.variantId) {
-      void createClient().rpc("add_cart_item", { target_variant_id: product.variantId, quantity_delta: 1 }).then(({ error }) => {
+    const option = product?.variants?.find((variant) => variant.id === variantId) ?? product?.variants?.[0];
+    const cartItem: StoreCartItem = { productId: id, variantId: variantId ?? option?.id ?? product?.variantId, optionName: option?.name, price: option?.price ?? product?.price };
+    setCart((current) => {
+      const nextCart = [...current, cartItem];
+      if (!currentUser) guestCartRef.current = nextCart;
+      return nextCart;
+    });
+    if (currentUser && cartItem.variantId) {
+      void createClient().rpc("add_cart_item", { target_variant_id: cartItem.variantId, quantity_delta: 1 }).then(({ error }) => {
         if (error) showNotice(error.message);
       });
     }
@@ -267,14 +352,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     showNotice("Added to your glow bag");
   }
 
-  function removeFromCart(id: string) {
-    const product = catalogProducts.find((item) => item.id === id);
+  function removeFromCart(item: StoreCartItem) {
     setCart((current) => {
-      const index = current.lastIndexOf(id);
-      return current.filter((_, itemIndex) => itemIndex !== index);
+      const index = current.findLastIndex((entry) => entry.productId === item.productId && entry.variantId === item.variantId);
+      const nextCart = current.filter((_, itemIndex) => itemIndex !== index);
+      if (!currentUser) guestCartRef.current = nextCart;
+      return nextCart;
     });
-    if (currentUser && product?.variantId) {
-      void createClient().rpc("remove_cart_item", { target_variant_id: product.variantId }).then(({ error }) => {
+    if (currentUser && item.variantId) {
+      void createClient().rpc("remove_cart_item", { target_variant_id: item.variantId }).then(({ error }) => {
         if (error) showNotice(error.message);
       });
     }
@@ -283,11 +369,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   function completeAuth(destination: string) {
     setAuthOpen(false);
     showNotice("You’re signed in to BelGlow");
-    router.push(destination);
+    router.replace(destination);
+    router.refresh();
   }
 
   async function signOut() {
     await createClient().auth.signOut();
+    clearPrivateShoppingState();
     setAuthOpen(false);
     setCartOpen(false);
     setWishlistOpen(false);
@@ -306,12 +394,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   return <StoreContext.Provider value={value}>
     <div inert={blockingOverlay ? true : undefined} aria-hidden={blockingOverlay || undefined}>{children}</div>
-    {selectedProductId !== null && <ProductPreview productId={selectedProductId} onClose={() => setSelectedProductId(null)} onAdd={addToCart} onFavorite={toggleFavorite} favorite={favoriteIds.includes(selectedProductId)} />}
-    {cartOpen && <CartDrawer cart={cart} products={catalogProducts} onClose={() => setCartOpen(false)} onRemove={removeFromCart} />}
+    {selectedProductId !== null && catalogProducts.find((product) => product.id === selectedProductId) && <ProductPreviewModal product={catalogProducts.find((product) => product.id === selectedProductId)!} onClose={() => setSelectedProductId(null)} onAdd={addToCart} onFavorite={toggleFavorite} favorite={favoriteIds.includes(selectedProductId)} />}
+    {cartOpen && <CartDrawer cart={cart} products={catalogProducts} isGuest={!currentUser} onClose={() => setCartOpen(false)} onRemove={removeFromCart} />}
     {wishlistOpen && <SavedProductsPanel favoriteIds={favoriteIds} products={catalogProducts} onClose={() => setWishlistOpen(false)} onRemove={toggleFavorite} onOpen={(id) => { setWishlistOpen(false); openProduct(id); }} />}
     {authOpen && <AuthModal onClose={() => setAuthOpen(false)} onSuccess={completeAuth} />}
     {notice && <div role="status" className="toast-in fixed bottom-6 left-1/2 z-[100] -translate-x-1/2 rounded-full bg-[#241a1e] px-5 py-3 text-sm font-semibold text-white shadow-xl">{notice}</div>}
   </StoreContext.Provider>;
+}
+
+function isDatabaseId(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export function useStore() {
@@ -320,23 +412,12 @@ export function useStore() {
   return context;
 }
 
-function ProductPreview({ productId, onClose, onAdd, onFavorite, favorite }: { productId: string; onClose: () => void; onAdd: (id: string) => void; onFavorite: (id: string) => void; favorite: boolean }) {
-  const product = products.find((item) => item.id === productId);
-  if (!product) return null;
-  return <ModalShell label={`${product.name} details`} onClose={onClose}>
-    <div className="grid overflow-hidden rounded-[28px] bg-white sm:grid-cols-[.9fr_1fr]">
-      <div className="relative min-h-[300px] bg-[#fff0f4] sm:min-h-[460px]"><Image src={product.imageUrl ?? "/images/belglow-hero-products.png"} unoptimized={Boolean(product.imageUrl)} alt={product.name} fill sizes="(max-width: 640px) 100vw, 45vw" className="scale-[1.7] object-cover" style={{ objectPosition: product.position }} /></div>
-      <div className="flex flex-col p-7 sm:p-9"><div className="flex justify-between gap-4"><p className="text-xs font-bold uppercase tracking-[.18em] text-[#ed4773]">{product.category}</p><button onClick={onClose} aria-label="Close product details"><X /></button></div><h2 className="mt-4 text-3xl font-black tracking-[-.04em]">{product.name}</h2><p className="mt-3 text-sm text-[#74696d]">★ {product.rating}</p><p className="mt-5 leading-7 text-[#65595e]">{product.description || "A nurturing BelGlow essential selected to make your daily beauty and self-care routine feel simple, joyful, and radiant."}</p><p className="mt-6 text-2xl font-black">BZ${product.price.toFixed(2)}</p><div className="mt-auto grid grid-cols-[auto_1fr] gap-3 pt-8"><button onClick={() => onFavorite(product.id)} aria-label={favorite ? "Remove from wishlist" : "Save to wishlist"} className="grid h-13 w-13 place-items-center rounded-full border border-[#eacfd7] text-[#ed4773]"><Heart fill={favorite ? "#ed4773" : "none"} /></button><button onClick={() => onAdd(product.id)} className="flex items-center justify-center gap-2 rounded-full bg-[#ef4b74] px-6 font-bold text-white"><ShoppingBag size={19} /> Add to cart</button></div></div>
-    </div>
-  </ModalShell>;
-}
-
-function CartDrawer({ cart, products, onClose, onRemove }: { cart: string[]; products: ReadonlyArray<StoreProduct>; onClose: () => void; onRemove: (id: string) => void }) {
-  const total = cart.reduce((sum, id) => sum + (products.find((product) => product.id === id)?.price ?? 0), 0);
+function CartDrawer({ cart, products, isGuest, onClose, onRemove }: { cart: StoreCartItem[]; products: ReadonlyArray<StoreProduct>; isGuest: boolean; onClose: () => void; onRemove: (item: StoreCartItem) => void }) {
+  const total = cart.reduce((sum, item) => sum + (item.price ?? products.find((product) => product.id === item.productId)?.price ?? 0), 0);
   return <FramePanel label="Shopping bag">
     <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[#ed4773]">Your glow bag</p><h2 className="mt-1 text-2xl font-black">{cart.length} {cart.length === 1 ? "item" : "items"}</h2></div><button onClick={onClose} aria-label="Close shopping bag" className="rounded-full bg-[#fff1f5] p-2"><X /></button></div>
-    <div className="mt-5 flex-1 space-y-3 overflow-auto pr-1">{cart.length === 0 && <EmptyPanel icon={<ShoppingBag />} title="Your bag is ready" text="Add a little glow whenever you're ready." />}{cart.map((id, index) => { const product = products.find((item) => item.id === id); if (!product) return null; return <PanelProduct key={`${id}-${index}`} product={product} action={<button onClick={() => onRemove(id)} aria-label={`Remove ${product.name}`} className="rounded-full p-2 hover:bg-[#fff1f5]"><Minus size={17} /></button>} />; })}</div>
-    <div className="mt-4 border-t border-[#eee2e5] pt-4"><div className="flex justify-between text-lg font-black"><span>Total</span><span>BZ${total.toFixed(2)}</span></div>{cart.length > 0 && <Link href="/checkout" onClick={onClose} className="mt-4 block w-full rounded-full bg-[#ef4b74] py-3.5 text-center font-bold text-white">Continue to checkout</Link>}</div>
+    <div className="mt-5 flex-1 space-y-3 overflow-auto pr-1">{cart.length === 0 && <EmptyPanel icon={<ShoppingBag />} title="Your bag is ready" text="Add a little glow whenever you're ready." />}{cart.map((item, index) => { const product = products.find((productItem) => productItem.id === item.productId); if (!product) return null; return <PanelProduct key={`${item.productId}-${item.variantId}-${index}`} product={product} detail={item.optionName && item.optionName !== "Default" ? item.optionName : undefined} price={item.price} action={<button onClick={() => onRemove(item)} aria-label={`Remove ${product.name}`} className="rounded-full p-2 hover:bg-[#fff1f5]"><Minus size={17} /></button>} />; })}</div>
+    <div className="mt-4 border-t border-[#eee2e5] pt-4">{isGuest && cart.length > 0 && <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900"><strong>Temporary guest cart:</strong> refreshing or closing this tab clears these items and abandons an unfinished checkout.</p>}<div className="flex justify-between text-lg font-black"><span>Total</span><span>BZ${total.toFixed(2)}</span></div>{cart.length > 0 && <Link href="/checkout" onClick={onClose} className="mt-4 block w-full rounded-full bg-[#ef4b74] py-3.5 text-center font-bold text-white">Continue to checkout</Link>}</div>
   </FramePanel>;
 }
 
@@ -352,8 +433,8 @@ function FramePanel({ children, label }: { children: ReactNode; label: string })
   return <div className="fixed inset-0 z-[90] bg-[#211a1d]/20 backdrop-blur-[1px]"><aside role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} autoFocus className="frame-panel absolute flex flex-col rounded-[24px] border border-[#f0dfe4] bg-white p-5 shadow-[0_24px_70px_rgba(71,31,43,.22)] sm:p-6">{children}</aside></div>;
 }
 
-function PanelProduct({ product, action, onOpen }: { product: StoreProduct; action: ReactNode; onOpen?: () => void }) {
-  return <div className="flex items-center gap-3 rounded-2xl border border-[#eee2e5] p-3"><button onClick={onOpen} disabled={!onOpen} className="relative h-18 w-18 shrink-0 overflow-hidden rounded-xl bg-[#fff0f4] disabled:cursor-default"><Image src={product.imageUrl ?? "/images/belglow-hero-products.png"} unoptimized={Boolean(product.imageUrl)} alt="" fill sizes="72px" className="scale-[2] object-cover" style={{ objectPosition: product.position }} /></button><button onClick={onOpen} disabled={!onOpen} className="min-w-0 flex-1 text-left disabled:cursor-default"><p className="truncate text-sm font-bold">{product.name}</p><p className="mt-1 text-sm text-[#786d71]">BZ${product.price.toFixed(2)}</p></button>{action}</div>;
+function PanelProduct({ product, action, onOpen, detail, price }: { product: StoreProduct; action: ReactNode; onOpen?: () => void; detail?: string; price?: number }) {
+  return <div className="flex items-center gap-3 rounded-2xl border border-[#eee2e5] p-3"><button onClick={onOpen} disabled={!onOpen} className="relative h-18 w-18 shrink-0 overflow-hidden rounded-xl bg-[#fff0f4] disabled:cursor-default"><Image src={product.imageUrl ?? "/images/belglow-hero-products.png"} unoptimized={Boolean(product.imageUrl)} alt="" fill sizes="72px" className="scale-[2] object-cover" style={{ objectPosition: product.position }} /></button><button onClick={onOpen} disabled={!onOpen} className="min-w-0 flex-1 text-left disabled:cursor-default"><p className="truncate text-sm font-bold">{product.name}</p>{detail && <p className="mt-0.5 text-xs text-[#8b7d82]">{detail}</p>}<p className="mt-1 text-sm text-[#786d71]">BZ${(price ?? product.price).toFixed(2)}</p></button>{action}</div>;
 }
 
 function EmptyPanel({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
@@ -368,7 +449,7 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (de
   const [sent, setSent] = useState(false);
 
   function destination() {
-    return mode === "signup" && role === "seller" ? "/seller-application" : "/shop";
+    return mode === "signup" && role === "seller" ? "/seller-application" : "/account";
   }
 
   async function submitEmail(event: FormEvent<HTMLFormElement>) {
@@ -397,7 +478,9 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (de
       } else {
         const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
         if (authError) throw authError;
-        onSuccess("/shop");
+        // Let the server resolve the newly authenticated account to its
+        // authorized destination (admin, approved seller, or shopper).
+        onSuccess("/account");
       }
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "Unable to authenticate. Please try again.");
@@ -411,7 +494,7 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (de
     setError("");
     const { error: authError } = await createClient().auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/shop")}` },
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/account")}` },
     });
     if (authError) {
       setError(authError.message);
@@ -456,6 +539,6 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (de
   </ModalShell>;
 }
 
-function ModalShell({ children, label, onClose }: { children: ReactNode; label: string; onClose: () => void }) {
-  return <div className="fixed inset-0 z-[90] grid place-items-center overflow-y-auto bg-[#211a1d]/45 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={label} onMouseDown={onClose}><div className="flex w-full max-w-4xl justify-center" onMouseDown={(event) => event.stopPropagation()}>{children}</div></div>;
+function ModalShell({ children, label, onClose, wide = false }: { children: ReactNode; label: string; onClose: () => void; wide?: boolean }) {
+  return <div className="fixed inset-0 z-[90] grid place-items-center overflow-y-auto bg-[#211a1d]/45 p-2 backdrop-blur-sm sm:p-4" role="dialog" aria-modal="true" aria-label={label} onMouseDown={onClose}><div className={`flex w-full justify-center ${wide ? "max-w-7xl" : "max-w-4xl"}`} onMouseDown={(event) => event.stopPropagation()}>{children}</div></div>;
 }

@@ -58,12 +58,12 @@ export default function SiteHeader({
       openAuth();
       return;
     }
-    if (userRole === "admin") router.push("/admin");
-    else if (userRole === "seller") router.push("/dashboard");
-    else router.push("/shop");
+    // Keep account routing centralized so a refreshed role or seller approval
+    // is honored instead of relying on possibly stale client-side profile data.
+    router.push("/account");
   }
 
-  const accountLabel = userRole === "admin" ? "Admin dashboard" : userRole === "seller" ? "Seller dashboard" : userName ? "Shop marketplace" : "Sign in or create account";
+  const accountLabel = userRole === "admin" ? "Admin dashboard" : userRole === "seller" ? "Seller dashboard" : userName ? "My account" : "Sign in or create account";
 
   function isActiveNavigation(href: string) {
     if (href === "/") return pathname === "/" && activeHash !== "#about" && activeHash !== "#blog";

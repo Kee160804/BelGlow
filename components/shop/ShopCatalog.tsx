@@ -5,22 +5,27 @@ import { SlidersHorizontal, Sparkles } from "lucide-react";
 import SiteHeader from "@/components/layout/SiteHeader";
 import ProductCard from "@/components/products/ProductCard";
 import { useStore } from "@/components/providers/StoreProvider";
+import { useMarketplaceCategories } from "@/components/categories/useMarketplaceCategories";
+import { categoryChildren, rootCategories } from "@/lib/marketplace-categories";
 
 export default function ShopCatalog({ initialCategory = "All", initialQuery = "" }: { initialCategory?: string; initialQuery?: string }) {
   const [category, setCategory] = useState(initialCategory);
   const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState("recommended");
   const { favoriteIds, products, recommendations } = useStore();
-  const categories = ["All", ...Array.from(new Set(products.map((product) => product.category)))];
+  const { categories: marketplaceCategories } = useMarketplaceCategories();
+  const categories = ["All", ...rootCategories(marketplaceCategories).map((item) => item.name)];
 
   const visibleProducts = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const source = sort === "recommended" ? recommendations : [...products];
-    const filtered = source.filter((product) => (category === "All" || product.category === category) && (!needle || `${product.name} ${product.category}`.toLowerCase().includes(needle)));
+    const selected = marketplaceCategories.find((item) => item.name === category);
+    const categoryNames = selected ? [selected.name, ...categoryChildren(marketplaceCategories, selected.id).map((item) => item.name)] : [category];
+    const filtered = source.filter((product) => (category === "All" || categoryNames.includes(product.category)) && (!needle || `${product.name} ${product.category}`.toLowerCase().includes(needle)));
     if (sort === "low") return [...filtered].sort((a, b) => a.price - b.price);
     if (sort === "high") return [...filtered].sort((a, b) => b.price - a.price);
     return filtered;
-  }, [category, products, query, recommendations, sort]);
+  }, [category, marketplaceCategories, products, query, recommendations, sort]);
 
   const favoriteProducts = products.filter((product) => favoriteIds.includes(product.id));
 
