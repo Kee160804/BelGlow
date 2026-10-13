@@ -6,7 +6,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ChevronUp, CirclePlus, Edit3, ImagePlus, Package, Save, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { createSellerProduct, updateSellerProduct } from "@/app/dashboard/products/actions";
-import { categoryLabel } from "@/lib/marketplace-categories";
+import { categoryChildren, rootCategories } from "@/lib/marketplace-categories";
 
 type ProductVariant = { id?: string; name: string; price: string; quantity: number };
 type SellerProduct = {
@@ -101,6 +101,8 @@ export default function SellerProductManager({ mode }: { mode: "list" | "create"
     await loadProducts();
   }
 
+  if (mode === "create" && loading) return <p className="rounded-2xl border border-[#ede3df] bg-white py-12 text-center text-sm text-[#817679]">Loading store categories…</p>;
+
   if (mode === "create") return <div>
     <ProductEditor key={formVersion} categories={categories} saving={saving} onSubmit={(event) => void submit(event)} />
     <Feedback error={error} message={message} />
@@ -124,15 +126,24 @@ export default function SellerProductManager({ mode }: { mode: "list" | "create"
 
 function ProductEditor({ categories, product, saving, onSubmit, onCancel }: { categories: Category[]; product?: SellerProduct; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onCancel?: () => void }) {
   const [variants, setVariants] = useState<ProductVariant[]>(product?.variants ?? [{ name: "Default", price: "", quantity: 0 }]);
+  const assignedCategory = categories.find((category) => category.slug === product?.categorySlug);
+  const assignedMainCategory = assignedCategory?.parent_id ? categories.find((category) => category.id === assignedCategory.parent_id) : assignedCategory;
+  const [selectedMainCategory, setSelectedMainCategory] = useState(assignedMainCategory?.slug ?? "");
+  const [selectedSubcategory, setSelectedSubcategory] = useState(assignedCategory?.parent_id ? assignedCategory.slug : "");
+  const mainCategories = rootCategories(categories);
+  const selectedMain = mainCategories.find((category) => category.slug === selectedMainCategory);
+  const subcategories = selectedMain ? categoryChildren(categories, selectedMain.id) : [];
   const attributes = product?.attributes ?? {};
   const updateVariant = (index: number, changes: Partial<ProductVariant>) => setVariants((current) => current.map((variant, itemIndex) => itemIndex === index ? { ...variant, ...changes } : variant));
   return <form onSubmit={onSubmit} className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]">
     {product && <input type="hidden" name="productId" value={product.id} />}
     <input type="hidden" name="variants" value={JSON.stringify(variants)} />
+    <input type="hidden" name="category" value={selectedSubcategory || selectedMainCategory} />
     <div className="space-y-5">
       <section className="rounded-2xl border border-[#ede3df] bg-white p-5"><div className="flex items-center gap-2"><Package size={19} className="text-[#b65f5b]" /><h2 className="text-lg font-bold">Storefront information</h2></div><div className="mt-5 grid gap-4 sm:grid-cols-2">
         <Field label="Product name" name="name" required defaultValue={product?.name} placeholder="e.g. Hibiscus Glow Oil" wide />
-        <label className="text-sm font-semibold">Store category<select name="category" required defaultValue={product?.categorySlug ?? ""} className={inputClass}><option value="" disabled>Select a category</option>{categories.map((category) => <option key={category.slug} value={category.slug}>{categoryLabel(category, categories)}</option>)}</select><span className="mt-1 block text-xs font-normal text-[#817477]">Categories are maintained by BelGlow administrators and sync with the public store.</span></label>
+        <label className="text-sm font-semibold">Store category<select required value={selectedMainCategory} onChange={(event) => { setSelectedMainCategory(event.target.value); setSelectedSubcategory(""); }} className={inputClass}><option value="" disabled>Select a category</option>{mainCategories.map((category) => <option key={category.slug} value={category.slug}>{category.name}</option>)}</select><span className="mt-1 block text-xs font-normal text-[#817477]">Select the main public-store category.</span></label>
+        <label className="text-sm font-semibold">Subcategory<select value={selectedSubcategory} onChange={(event) => setSelectedSubcategory(event.target.value)} disabled={!selectedMainCategory || subcategories.length === 0} className={`${inputClass} disabled:cursor-not-allowed disabled:bg-[#f3efed] disabled:text-[#978b8e]`}><option value="">{!selectedMainCategory ? "Select a category first" : subcategories.length === 0 ? "No subcategories available" : "Select a subcategory"}</option>{subcategories.map((subcategory) => <option key={subcategory.slug} value={subcategory.slug}>{subcategory.name}</option>)}</select><span className="mt-1 block text-xs font-normal text-[#817477]">Only subcategories from the selected category appear here.</span></label>
         <Field label="Product subtitle" name="subtitle" defaultValue={String(attributes.subtitle ?? "")} placeholder="e.g. With niacinamide for radiant glow" />
         <Field label="Original/compare price (BZD)" name="comparePrice" type="number" step="0.01" min="0.01" defaultValue={product?.compare_at_price_cents ? (product.compare_at_price_cents / 100).toFixed(2) : ""} placeholder="Optional sale comparison" />
         <label className="text-sm font-semibold sm:col-span-2">Short description<textarea name="shortDescription" maxLength={240} rows={2} defaultValue={product?.short_description ?? ""} placeholder="A short summary shown near the product title" className={textareaClass} /></label>

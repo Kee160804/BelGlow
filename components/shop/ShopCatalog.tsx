@@ -15,6 +15,11 @@ export default function ShopCatalog({ initialCategory = "All", initialQuery = ""
   const { favoriteIds, products, recommendations } = useStore();
   const { categories: marketplaceCategories } = useMarketplaceCategories();
   const categories = ["All", ...rootCategories(marketplaceCategories).map((item) => item.name)];
+  const selectedCategory = marketplaceCategories.find((item) => item.name === category);
+  const activeRoot = selectedCategory?.parent_id
+    ? marketplaceCategories.find((item) => item.id === selectedCategory.parent_id)
+    : selectedCategory;
+  const subcategories = activeRoot ? categoryChildren(marketplaceCategories, activeRoot.id) : [];
 
   const visibleProducts = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -37,7 +42,11 @@ export default function ShopCatalog({ initialCategory = "All", initialQuery = ""
       </section>
 
       <section className="px-5 py-9 sm:px-10 lg:px-16">
-        <div className="flex gap-2 overflow-x-auto pb-3" aria-label="Filter products by category">{categories.map((item) => <button key={item} onClick={() => setCategory(item)} aria-pressed={category === item} className={`shrink-0 rounded-full px-4 py-2.5 text-sm font-bold transition ${category === item ? "bg-[#ef4b74] text-white" : "bg-[#fff0f4] text-[#61555a] hover:bg-[#f8d9e2]"}`}>{item}</button>)}</div>
+        <div className="flex gap-2 overflow-x-auto pb-3" aria-label="Filter products by category">{categories.map((item) => {
+          const active = item === "All" ? category === "All" : activeRoot?.name === item;
+          return <button key={item} onClick={() => setCategory(item)} aria-pressed={active} className={`shrink-0 rounded-full px-4 py-2.5 text-sm font-bold transition ${active ? "bg-[#ef4b74] text-white" : "bg-[#fff0f4] text-[#61555a] hover:bg-[#f8d9e2]"}`}>{item}</button>;
+        })}</div>
+        {subcategories.length > 0 && <div className="mt-2 rounded-2xl border border-[#f1dfe4] bg-[#fff8fa] p-3"><p className="mb-2 px-1 text-[11px] font-bold uppercase tracking-[.18em] text-[#a67482]">Shop {activeRoot?.name} by type</p><div className="flex gap-2 overflow-x-auto pb-1" aria-label={`Filter ${activeRoot?.name ?? "category"} products by subcategory`}><button onClick={() => setCategory(activeRoot?.name ?? "All")} aria-pressed={category === activeRoot?.name} className={`shrink-0 rounded-full border px-3.5 py-2 text-xs font-bold transition ${category === activeRoot?.name ? "border-[#ef4b74] bg-[#ef4b74] text-white" : "border-[#eccfd8] bg-white text-[#6c5960] hover:border-[#ef4b74] hover:text-[#df3865]"}`}>All {activeRoot?.name}</button>{subcategories.map((subcategory) => <button key={subcategory.id} onClick={() => setCategory(subcategory.name)} aria-pressed={category === subcategory.name} className={`shrink-0 rounded-full border px-3.5 py-2 text-xs font-bold transition ${category === subcategory.name ? "border-[#ef4b74] bg-[#ef4b74] text-white" : "border-[#eccfd8] bg-white text-[#6c5960] hover:border-[#ef4b74] hover:text-[#df3865]"}`}>{subcategory.name}</button>)}</div></div>}
         <div className="mt-5 flex items-end justify-between"><div><h2 className="text-2xl font-black tracking-[-.035em]">{category === "All" ? "All products" : category}</h2><p className="mt-1 text-sm text-[#7d7175]">{visibleProducts.length} products</p></div>{sort === "recommended" && <p className="hidden items-center gap-1.5 text-xs font-bold text-[#e63e6b] sm:flex"><Sparkles size={15} /> Learns from your activity</p>}</div>
         {visibleProducts.length ? <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{visibleProducts.map((product) => <ProductCard key={product.id} product={product} />)}</div> : <div className="mt-6 rounded-3xl border border-dashed border-[#e8cbd3] bg-[#fff7f9] py-16 text-center"><p className="font-bold">No products found</p><button onClick={() => { setQuery(""); setCategory("All"); }} className="mt-3 text-sm font-bold text-[#df3865]">Clear filters</button></div>}
       </section>
