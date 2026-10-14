@@ -97,10 +97,10 @@ export default function SellerOperations({ workspace }: { workspace: Workspace }
     if (!nextStatus) return;
     setBusy(row.id);
     setError("");
-    const patch: Record<string, string> = { status: nextStatus };
-    if (nextStatus === "accepted") patch.accepted_at = new Date().toISOString();
-    if (nextStatus === "shipped") patch.shipped_at = new Date().toISOString();
-    const { error: updateError } = await createClient().from("seller_orders").update(patch).eq("id", row.id);
+    const { error: updateError } = await createClient().rpc("transition_seller_order", {
+      target_seller_order_id: row.id,
+      next_status: nextStatus,
+    });
     setBusy("");
     if (updateError) setError(updateError.message);
     else {

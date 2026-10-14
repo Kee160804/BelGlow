@@ -1,10 +1,12 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { BadgeCheck, ChevronLeft, ChevronRight, Expand, Heart, Leaf, Minus, PackageCheck, Plus, Share2, ShieldCheck, ShoppingBag, Sparkles, Star, Store, Truck, X } from "lucide-react";
 import type { StoreProduct } from "@/lib/catalog";
+import { useStore } from "@/components/providers/StoreProvider";
 
 type Props = {
   product: StoreProduct;
@@ -15,6 +17,7 @@ type Props = {
 };
 
 export default function ProductPreviewModal({ product, onClose, onAdd, onFavorite, favorite }: Props) {
+  const { savedStoreIds, toggleSavedStore } = useStore();
   const router = useRouter();
   const uploadedImages = product.imageUrls?.length ? product.imageUrls : product.imageUrl ? [product.imageUrl] : [];
   const gallery = uploadedImages.length
@@ -91,7 +94,7 @@ export default function ProductPreviewModal({ product, onClose, onAdd, onFavorit
             <div className="mt-4 grid grid-cols-[132px_1fr] gap-3"><div className="flex h-13 items-center justify-between rounded-xl border border-[#e5dade] px-3"><button onClick={() => setQuantity((current) => Math.max(1, current - 1))} aria-label="Decrease quantity" className="p-1"><Minus size={18} /></button><strong>{quantity}</strong><button onClick={() => setQuantity((current) => Math.min(Math.min(10, availableStock), current + 1))} disabled={availableStock < 1} aria-label="Increase quantity" className="p-1 disabled:opacity-40"><Plus size={18} /></button></div><button onClick={addSelectedQuantity} disabled={availableStock < 1} className="flex h-13 items-center justify-center gap-2 rounded-full bg-[#ef2d69] px-6 font-bold text-white shadow-[0_10px_24px_rgba(239,45,105,.22)] transition hover:bg-[#dc205b] disabled:cursor-not-allowed disabled:opacity-45"><ShoppingBag size={20} /> Add to cart</button></div>
             <button onClick={buyNow} disabled={availableStock < 1} className="mt-2 w-full rounded-full bg-[#ffe3ec] py-3 text-sm font-bold text-[#ec2363] transition hover:bg-[#ffd6e3] disabled:cursor-not-allowed disabled:opacity-45">Buy now</button>
 
-            <div className="mt-4 flex items-center gap-4 rounded-2xl bg-[linear-gradient(100deg,#fff5f7,#fff)] p-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#ffdce7] text-[#e93468]"><Store /></span><div className="min-w-0 flex-1"><p className="text-xs text-[#766b70]">Sold by</p><p className="truncate font-bold">{product.sellerName || "BelGlow verified seller"} <BadgeCheck size={16} className="inline text-[#ef3f70]" /></p></div><button onClick={() => onFavorite(product.id)} aria-label={favorite ? "Remove from wishlist" : "Save to wishlist"} className="grid h-10 w-10 place-items-center rounded-full border border-[#f0c7d3] text-[#ed4773]"><Heart size={20} fill={favorite ? "#ed4773" : "none"} /></button><button onClick={() => void navigator.clipboard?.writeText(window.location.href)} aria-label="Share product" className="grid h-10 w-10 place-items-center rounded-full border border-[#f0c7d3]"><Share2 size={19} /></button></div>
+            <div className="mt-4 flex flex-wrap items-center gap-4 rounded-2xl bg-[linear-gradient(100deg,#fff5f7,#fff)] p-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#ffdce7] text-[#e93468]"><Store /></span><div className="min-w-0 flex-1"><p className="text-xs text-[#766b70]">Sold by</p><p className="truncate font-bold">{product.sellerName || "BelGlow verified seller"} <BadgeCheck size={16} className="inline text-[#ef3f70]" /></p></div>{product.sellerSlug && <Link href={`/store/${product.sellerSlug}`} onClick={onClose} className="rounded-full border border-[#f0c7d3] px-3 py-2 text-xs font-bold text-[#d93667]">Visit store</Link>}{product.sellerStoreId && <button onClick={() => toggleSavedStore(product.sellerStoreId!)} aria-label={savedStoreIds.includes(product.sellerStoreId) ? "Remove business from favorites" : "Save business to favorites"} className="grid h-10 w-10 place-items-center rounded-full border border-[#f0c7d3] text-[#ed4773]"><Heart size={20} fill={savedStoreIds.includes(product.sellerStoreId) ? "#ed4773" : "none"} /></button>}<button onClick={() => onFavorite(product.id)} aria-label={favorite ? "Remove product from wishlist" : "Save product to wishlist"} className="grid h-10 w-10 place-items-center rounded-full border border-[#f0c7d3] text-[#ed4773]"><Heart size={20} fill={favorite ? "#ed4773" : "none"} /></button><button onClick={() => void navigator.clipboard?.writeText(product.slug ? `${window.location.origin}/product/${product.slug}` : window.location.href)} aria-label="Share product" className="grid h-10 w-10 place-items-center rounded-full border border-[#f0c7d3]"><Share2 size={19} /></button></div>
             <div className="mt-4 grid grid-cols-2 gap-2 border-y border-[#eee4e7] py-4 text-xs sm:grid-cols-4"><ProductFeature icon={<Truck />} title="Free shipping" text="Over BZ$50" /><ProductFeature icon={<PackageCheck />} title="Easy returns" text="14-day policy" /><ProductFeature icon={<ShieldCheck />} title="Secure checkout" text="Protected" /><ProductFeature icon={<Leaf />} title="Natural care" text="Seller selected" /></div>
             <div className="mt-4"><div className="flex gap-5 overflow-x-auto border-b border-[#eee4e7]">{Object.keys(detailContent).map((tab) => <button key={tab} onClick={() => setActiveTab(tab)} className={`shrink-0 border-b-2 px-1 pb-3 text-xs font-semibold ${activeTab === tab ? "border-[#ef3f70] text-[#ef2362]" : "border-transparent text-[#70666a]"}`}>{tab}</button>)}</div><p className="pt-4 text-sm leading-6 text-[#655b60]">{detailContent[activeTab]}</p></div>
           </section>

@@ -94,6 +94,8 @@ export type StoreProduct = {
   usageInstructions?: string;
   shippingInfo?: string;
   sellerName?: string;
+  sellerStoreId?: string;
+  sellerSlug?: string;
   compareAtPrice?: number;
   stock?: number;
   variants?: Array<{ id: string; name: string; price: number; stock: number }>;

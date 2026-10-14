@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ArrowUpRight, BarChart3, BadgePercent, Bell, Boxes, ChevronDown,
+  ArrowUpRight, BarChart3, BadgePercent, Boxes, ChevronDown,
   CircleDollarSign, House, LogOut, Menu, Package, Plus, Search,
   Settings, ShoppingBag, Star, Store, Users, WalletCards, X,
 } from "lucide-react";
@@ -14,6 +14,8 @@ import SellerProductManager from "@/components/dashboard/SellerProductManager";
 import SellerOperations from "@/components/dashboard/SellerOperations";
 import SellerOverview from "@/components/dashboard/SellerOverview";
 import DashboardSwitcher from "@/components/dashboard/DashboardSwitcher";
+import SellerBusinessTools from "@/components/dashboard/SellerBusinessTools";
+import NotificationBell from "@/components/dashboard/NotificationBell";
 
 const navigation = [
   { label: "Dashboard", href: "/dashboard", icon: House },
@@ -109,7 +111,7 @@ export default function SellerDashboard({ accountRole, initialUserName }: { acco
           <DashboardSwitcher role={accountRole} />
           <label className="hidden max-w-xl flex-1 items-center gap-3 rounded-xl bg-[#f4f0ee] px-4 sm:flex"><Search size={19} className="text-[#666064]" /><span className="sr-only">Search dashboard</span><input placeholder="Search products, orders, customers..." className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
-            <button className="relative rounded-full p-2" aria-label="Notifications"><Bell size={20} /><span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" /></button>
+            <NotificationBell />
             <div ref={accountMenuRef} className="relative">
               <button onClick={() => setAccountMenuOpen((open) => !open)} aria-expanded={accountMenuOpen} aria-controls="seller-account-menu" className="flex items-center gap-3 rounded-xl px-1.5 py-1.5 text-left transition hover:bg-[#f7efec] sm:pr-3">
                 <span className="grid h-10 w-10 place-items-center rounded-full bg-[#ead0ca] font-serif text-lg text-[#a95b58]">G</span>
@@ -189,13 +191,9 @@ function renderSection(section: string) {
   if (section === "add-product") return <SellerProductManager mode="create" />;
   if (section === "orders") return <SellerOperations workspace="orders" />;
   if (section === "inventory") return <SellerOperations workspace="inventory" />;
-  if (section === "customers") return <CustomersPage />;
-  if (section === "reviews") return <ReviewsPage />;
-  if (section === "promotions") return <PromotionsPage />;
-  if (section === "analytics") return <AnalyticsPage />;
+  if (section === "customers" || section === "reviews" || section === "promotions" || section === "analytics" || section === "store-profile" || section === "settings") return <SellerBusinessTools section={section} />;
   if (section === "payouts") return <SellerOperations workspace="payouts" />;
-  if (section === "store-profile") return <StoreProfilePage />;
-  return <SettingsPage />;
+  return <SellerProductManager mode="list" />;
 }
 
 const sellerProducts = [

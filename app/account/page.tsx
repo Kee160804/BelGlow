@@ -25,7 +25,7 @@ export default async function AccountPage() {
       .limit(8),
     supabase
       .from("addresses")
-      .select("id, label, address_line_1, city, district, is_default")
+      .select("id, label, recipient_name, phone, address_line_1, address_line_2, city, district, postal_code, delivery_notes, is_default")
       .eq("user_id", current.user.id)
       .order("is_default", { ascending: false })
       .limit(3),
@@ -35,6 +35,7 @@ export default async function AccountPage() {
     <CustomerDashboard
       name={current.profile.full_name || current.user.user_metadata?.full_name || current.user.email?.split("@")[0] || "BelGlow shopper"}
       email={current.user.email ?? ""}
+      phone={current.profile.phone ?? ""}
       role={accountRole}
       orders={orders ?? []}
       addresses={addresses ?? []}

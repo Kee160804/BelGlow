@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Heart, Mail, Minus, ShoppingBag, Sparkles, Store, UserRound, X } from "lucide-react";
-import { products, type StoreProduct } from "@/lib/catalog";
+import { type StoreProduct } from "@/lib/catalog";
 import { createClient } from "@/utils/supabase/client";
 import ProductPreviewModal from "@/components/products/ProductPreviewModal";
 
@@ -23,17 +23,20 @@ export type StoreCartItem = { productId: string; variantId?: string; optionName?
 type StoreContextValue = {
   cart: StoreCartItem[];
   favoriteIds: string[];
+  savedStoreIds: string[];
   products: ReadonlyArray<StoreProduct>;
   recommendations: ReadonlyArray<StoreProduct>;
   userName: string | null;
   userRole: AccountRole | null;
   addToCart: (id: string, variantId?: string) => void;
   toggleFavorite: (id: string) => void;
+  toggleSavedStore: (id: string) => void;
   openProduct: (id: string) => void;
   trackProduct: (id: string) => void;
   openCart: () => void;
   openWishlist: () => void;
   openAuth: () => void;
+  completeCheckout: () => void;
   signOut: () => void;
 };
 
@@ -43,10 +46,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [cart, setCart] = useState<StoreCartItem[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [savedStoreIds, setSavedStoreIds] = useState<string[]>([]);
   const [wishlistId, setWishlistId] = useState<string | null>(null);
   const guestCartRef = useRef<StoreCartItem[]>([]);
   const guestFavoritesRef = useRef<string[]>([]);
-  const [catalogProducts, setCatalogProducts] = useState<StoreProduct[]>(products);
+  const [catalogProducts, setCatalogProducts] = useState<StoreProduct[]>([]);
   const [interest, setInterest] = useState<Record<string, number>>({});
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
@@ -63,6 +67,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     guestFavoritesRef.current = [];
     setCart([]);
     setFavoriteIds([]);
+    setSavedStoreIds([]);
     setWishlistId(null);
   }
 
@@ -124,7 +129,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .select("id, seller_store_id, slug, name, short_description, description, ingredients, usage_instructions, attributes, base_price_cents, compare_at_price_cents")
         .eq("status", "active")
         .order("created_at", { ascending: false });
-      if (error || !rows?.length || !active) return;
+      if (error || !active) return;
+      if (!rows?.length) {
+        setCatalogProducts([]);
+        return;
+      }
 
       const ids = rows.map((row) => row.id);
       const storeIds = [...new Set(rows.map((row) => row.seller_store_id).filter((id): id is string => Boolean(id)))];
@@ -134,7 +143,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         supabase.from("product_variants").select("id, product_id, name, price_cents").in("product_id", ids).eq("is_active", true).order("sort_order"),
         supabase.from("product_images").select("product_id, storage_path, is_primary, sort_order").in("product_id", ids).order("sort_order"),
         supabase.from("reviews").select("product_id, rating").in("product_id", ids).eq("is_approved", true),
-        storeIds.length ? supabase.from("seller_stores").select("id, name").in("id", storeIds) : Promise.resolve({ data: [] }),
+        storeIds.length ? supabase.from("seller_stores").select("id, name, slug").in("id", storeIds) : Promise.resolve({ data: [] }),
       ]);
       if (!active) return;
 
@@ -152,6 +161,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const ratings = new Map<string, number[]>();
       for (const review of reviewsResult.data ?? []) ratings.set(review.product_id, [...(ratings.get(review.product_id) ?? []), review.rating]);
       const storeNames = new Map((storesResult.data ?? []).map((store) => [store.id, store.name]));
+      const storeSlugs = new Map((storesResult.data ?? []).map((store) => [store.id, store.slug]));
 
       const liveProducts = rows.map((row) => {
         const productVariants = variantsByProduct.get(row.id) ?? [];
@@ -178,6 +188,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           usageInstructions: row.usage_instructions ?? undefined,
           shippingInfo: typeof row.attributes?.shipping_info === "string" ? row.attributes.shipping_info : undefined,
           sellerName: row.seller_store_id ? storeNames.get(row.seller_store_id) : "BelGlow",
+          sellerStoreId: row.seller_store_id ?? undefined,
+          sellerSlug: row.seller_store_id ? storeSlugs.get(row.seller_store_id) : undefined,
           compareAtPrice: row.compare_at_price_cents ? Number(row.compare_at_price_cents) / 100 : undefined,
           stock: productVariants.reduce((total, option) => total + option.stock, 0),
           variants: productVariants,
@@ -265,6 +277,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [currentUser]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    let active = true;
+    createClient().from("saved_seller_stores").select("seller_store_id").eq("user_id", currentUser.id).then(({ data }) => {
+      if (active) setSavedStoreIds((data ?? []).map((row) => row.seller_store_id));
+    });
+    return () => { active = false; };
+  }, [currentUser]);
+
   // Lock page scrolling while a modal or framed panel owns the interaction focus.
   useEffect(() => {
     if (!blockingOverlay) return;
@@ -312,6 +333,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     else if (isDatabaseId(id)) void persistWishlistChange(id, shouldSave);
     trackProduct(id);
+  }
+
+  function toggleSavedStore(id: string) {
+    if (!currentUser) {
+      setAuthOpen(true);
+      showNotice("Sign in to save favorite businesses.");
+      return;
+    }
+    const shouldSave = !savedStoreIds.includes(id);
+    setSavedStoreIds((current) => shouldSave ? [...current, id] : current.filter((storeId) => storeId !== id));
+    const supabase = createClient();
+    const request = shouldSave
+      ? supabase.from("saved_seller_stores").upsert({ user_id: currentUser.id, seller_store_id: id }, { onConflict: "user_id,seller_store_id" })
+      : supabase.from("saved_seller_stores").delete().eq("user_id", currentUser.id).eq("seller_store_id", id);
+    void request.then(({ error }) => { if (error) showNotice(error.message); });
   }
 
   async function persistWishlistChange(productId: string, shouldSave: boolean) {
@@ -383,12 +419,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     router.replace("/");
   }
 
+  function completeCheckout() {
+    guestCartRef.current = [];
+    setCart([]);
+    setCartOpen(false);
+  }
+
   const value: StoreContextValue = {
-    cart, favoriteIds, products: catalogProducts, recommendations, userName, userRole, addToCart, toggleFavorite,
+    cart, favoriteIds, savedStoreIds, products: catalogProducts, recommendations, userName, userRole, addToCart, toggleFavorite, toggleSavedStore,
     openProduct, trackProduct,
     openCart: () => { setWishlistOpen(false); setCartOpen(true); },
     openWishlist: () => { setCartOpen(false); setWishlistOpen(true); },
     openAuth: () => setAuthOpen(true),
+    completeCheckout,
     signOut,
   };
 
