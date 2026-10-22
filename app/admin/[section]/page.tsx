@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import AdminDashboard from "@/components/admin/AdminDashboard";
 import { requireAdmin } from "@/lib/auth";
 
-const sections = ["sellers", "approvals", "orders", "commission", "payouts", "customers", "categories", "settings"] as const;
+const sections = ["sellers", "approvals", "orders", "commission", "payouts", "customers", "support", "categories", "settings"] as const;
 
 export async function generateMetadata({ params }: PageProps<"/admin/[section]">): Promise<Metadata> {
   const section = (await params).section;

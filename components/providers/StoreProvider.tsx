@@ -2,12 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
+import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Heart, Mail, Minus, ShoppingBag, Sparkles, Store, UserRound, X } from "lucide-react";
 import { type StoreProduct } from "@/lib/catalog";
 import { createClient } from "@/utils/supabase/client";
-import ProductPreviewModal from "@/components/products/ProductPreviewModal";
+
+const ProductPreviewModal = dynamic(() => import("@/components/products/ProductPreviewModal"));
 
 type AccountRole = "shopper" | "seller" | "admin";
 
@@ -16,6 +18,15 @@ type StoreUser = {
   name: string;
   email: string;
   role: AccountRole;
+};
+
+type CatalogPayload = {
+  id: string; sellerStoreId: string | null; slug: string; name: string; shortDescription: string | null;
+  description: string | null; ingredients: string | null; usageInstructions: string | null;
+  attributes: Record<string, unknown> | null; basePriceCents: number; compareAtPriceCents: number | null;
+  sellerName: string | null; sellerSlug: string | null; category: string; images: string[];
+  variants: Array<{ id: string; name: string; priceCents: number; stock: number }>;
+  ratingAverage: number | null; ratingCount: number;
 };
 
 export type StoreCartItem = { productId: string; variantId?: string; optionName?: string; price?: number };
@@ -44,6 +55,8 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const shouldLoadShoppingData = pathname === "/" || ["/shop", "/categories", "/product/", "/store/", "/checkout", "/account"].some((route) => pathname === route || pathname.startsWith(route));
   const [cart, setCart] = useState<StoreCartItem[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [savedStoreIds, setSavedStoreIds] = useState<string[]>([]);
@@ -121,10 +134,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!shouldLoadShoppingData) return;
     const supabase = createClient();
     let active = true;
 
     async function loadCatalog() {
+      const { data: fastCatalog } = await supabase.rpc("get_public_catalog");
+      if (active && Array.isArray(fastCatalog)) {
+        const optimizedProducts = (fastCatalog as CatalogPayload[]).map((product) => {
+          const variants = product.variants.map((variant) => ({ id: variant.id, name: variant.name, price: Number(variant.priceCents) / 100, stock: Number(variant.stock) }));
+          const imageUrls = product.images.map((path) => supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl);
+          const firstVariant = variants[0];
+          return {
+            id: product.id, slug: product.slug, name: product.name, category: product.category,
+            rating: product.ratingAverage === null ? "New" : `${Number(product.ratingAverage).toFixed(1)} (${product.ratingCount})`,
+            price: firstVariant?.price ?? Number(product.basePriceCents) / 100, position: "center",
+            description: product.description ?? product.shortDescription ?? undefined,
+            imageUrl: imageUrls[0], imageUrls, variantId: firstVariant?.id,
+            subtitle: typeof product.attributes?.subtitle === "string" ? product.attributes.subtitle : product.shortDescription ?? undefined,
+            ingredients: product.ingredients ?? undefined, usageInstructions: product.usageInstructions ?? undefined,
+            shippingInfo: typeof product.attributes?.shipping_info === "string" ? product.attributes.shipping_info : undefined,
+            sellerName: product.sellerName ?? "BelGlow", sellerStoreId: product.sellerStoreId ?? undefined,
+            sellerSlug: product.sellerSlug ?? undefined,
+            compareAtPrice: product.compareAtPriceCents ? Number(product.compareAtPriceCents) / 100 : undefined,
+            stock: variants.reduce((total, option) => total + option.stock, 0), variants,
+          } satisfies StoreProduct;
+        });
+        setCatalogProducts(optimizedProducts);
+        return;
+      }
+
+      // Compatibility path for deployments where the catalog RPC migration
+      // has not been applied yet.
       const { data: rows, error } = await supabase.from("products")
         .select("id, seller_store_id, slug, name, short_description, description, ingredients, usage_instructions, attributes, base_price_cents, compare_at_price_cents")
         .eq("status", "active")
@@ -200,13 +241,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     void loadCatalog();
     return () => { active = false; };
-  }, []);
+  }, [shouldLoadShoppingData]);
 
   useEffect(() => {
     const supabase = createClient();
     let active = true;
 
-    if (!currentUser) {
+    if (!currentUser || !shouldLoadShoppingData) {
       return () => { active = false; };
     } else {
       const currentUserId = currentUser.id;
@@ -234,13 +275,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       void hydrateSignedInCart();
     }
     return () => { active = false; };
-  }, [currentUser, catalogProducts]);
+  }, [currentUser, catalogProducts, shouldLoadShoppingData]);
 
   useEffect(() => {
     const supabase = createClient();
     let active = true;
 
-    if (!currentUser) {
+    if (!currentUser || !shouldLoadShoppingData) {
       return () => { active = false; };
     }
 
@@ -275,16 +316,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     void hydrateSignedInWishlist();
     return () => { active = false; };
-  }, [currentUser]);
+  }, [currentUser, shouldLoadShoppingData]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !shouldLoadShoppingData) return;
     let active = true;
     createClient().from("saved_seller_stores").select("seller_store_id").eq("user_id", currentUser.id).then(({ data }) => {
       if (active) setSavedStoreIds((data ?? []).map((row) => row.seller_store_id));
     });
     return () => { active = false; };
-  }, [currentUser]);
+  }, [currentUser, shouldLoadShoppingData]);
 
   // Lock page scrolling while a modal or framed panel owns the interaction focus.
   useEffect(() => {
@@ -428,8 +469,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value: StoreContextValue = {
     cart, favoriteIds, savedStoreIds, products: catalogProducts, recommendations, userName, userRole, addToCart, toggleFavorite, toggleSavedStore,
     openProduct, trackProduct,
-    openCart: () => { setWishlistOpen(false); setCartOpen(true); },
-    openWishlist: () => { setCartOpen(false); setWishlistOpen(true); },
+    openCart: () => { if (!shouldLoadShoppingData) router.push("/shop"); setWishlistOpen(false); setCartOpen(true); },
+    openWishlist: () => { if (!shouldLoadShoppingData) router.push("/shop"); setCartOpen(false); setWishlistOpen(true); },
     openAuth: () => setAuthOpen(true),
     completeCheckout,
     signOut,
@@ -477,7 +518,7 @@ function FramePanel({ children, label }: { children: ReactNode; label: string })
 }
 
 function PanelProduct({ product, action, onOpen, detail, price }: { product: StoreProduct; action: ReactNode; onOpen?: () => void; detail?: string; price?: number }) {
-  return <div className="flex items-center gap-3 rounded-2xl border border-[#eee2e5] p-3"><button onClick={onOpen} disabled={!onOpen} className="relative h-18 w-18 shrink-0 overflow-hidden rounded-xl bg-[#fff0f4] disabled:cursor-default"><Image src={product.imageUrl ?? "/images/belglow-hero-products.png"} unoptimized={Boolean(product.imageUrl)} alt="" fill sizes="72px" className="scale-[2] object-cover" style={{ objectPosition: product.position }} /></button><button onClick={onOpen} disabled={!onOpen} className="min-w-0 flex-1 text-left disabled:cursor-default"><p className="truncate text-sm font-bold">{product.name}</p>{detail && <p className="mt-0.5 text-xs text-[#8b7d82]">{detail}</p>}<p className="mt-1 text-sm text-[#786d71]">BZ${(price ?? product.price).toFixed(2)}</p></button>{action}</div>;
+  return <div className="flex items-center gap-3 rounded-2xl border border-[#eee2e5] p-3"><button onClick={onOpen} disabled={!onOpen} className="relative h-18 w-18 shrink-0 overflow-hidden rounded-xl bg-[#fff0f4] disabled:cursor-default"><Image src={product.imageUrl ?? "/images/belglow-hero-products.png"} alt="" fill sizes="72px" className="scale-[2] object-cover" style={{ objectPosition: product.position }} /></button><button onClick={onOpen} disabled={!onOpen} className="min-w-0 flex-1 text-left disabled:cursor-default"><p className="truncate text-sm font-bold">{product.name}</p>{detail && <p className="mt-0.5 text-xs text-[#8b7d82]">{detail}</p>}<p className="mt-1 text-sm text-[#786d71]">BZ${(price ?? product.price).toFixed(2)}</p></button>{action}</div>;
 }
 
 function EmptyPanel({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {

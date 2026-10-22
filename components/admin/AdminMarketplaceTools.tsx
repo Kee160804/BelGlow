@@ -42,17 +42,21 @@ export default function AdminMarketplaceTools({ section }: { section: Section })
   const load = useCallback(async () => {
     const supabase = createClient();
     setError("");
+    const needsSellers = ["overview", "sellers", "approvals", "payouts"].includes(section);
+    const needsProducts = ["overview", "approvals"].includes(section);
+    const needsSettings = ["overview", "commission", "settings"].includes(section);
+    const needsOrders = ["overview", "orders"].includes(section);
     const [sellerResult, productResult, settingsResult, orderResult, payoutResult, customerResult, requestResult, reviewResult, refundResult, imageResult] = await Promise.all([
-      supabase.from("seller_stores").select("id, name, slug, status, created_at, rejection_reason").order("created_at", { ascending: false }),
-      supabase.from("products").select("id, name, seller_store_id, base_price_cents, submitted_at, short_description, description, ingredients, usage_instructions").eq("review_status", "submitted").not("seller_store_id", "is", null).order("submitted_at", { ascending: false }),
-      supabase.from("marketplace_settings").select("default_commission_bps, seller_applications_open").eq("singleton", true).maybeSingle(),
-      supabase.from("orders").select("id, order_number, email, total_cents, payment_status, fulfillment_status, created_at").order("created_at", { ascending: false }).limit(100),
-      supabase.from("seller_payouts").select("id, seller_store_id, status, net_payout_cents, created_at").order("created_at", { ascending: false }).limit(100),
-      supabase.from("profiles").select("id, full_name, phone, role, created_at", { count: "exact" }).order("created_at", { ascending: false }).limit(100),
-      supabase.from("order_requests").select("id, order_id, request_type, reason, status, created_at").eq("status", "pending").order("created_at", { ascending: false }),
-      supabase.from("reviews").select("id, product_id, rating, title, body, created_at").eq("is_approved", false).order("created_at", { ascending: false }),
-      supabase.from("refunds").select("id, order_id, amount_cents, reason, status, created_at").eq("status", "pending").order("created_at", { ascending: false }),
-      supabase.from("product_images").select("product_id, storage_path, sort_order").order("sort_order").limit(500),
+      needsSellers ? supabase.from("seller_stores").select("id, name, slug, status, created_at, rejection_reason").order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      needsProducts ? supabase.from("products").select("id, name, seller_store_id, base_price_cents, submitted_at, short_description, description, ingredients, usage_instructions").eq("review_status", "submitted").not("seller_store_id", "is", null).order("submitted_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      needsSettings ? supabase.from("marketplace_settings").select("default_commission_bps, seller_applications_open").eq("singleton", true).maybeSingle() : Promise.resolve({ data: null, error: null }),
+      needsOrders ? supabase.from("orders").select("id, order_number, email, total_cents, payment_status, fulfillment_status, created_at").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
+      section === "payouts" ? supabase.from("seller_payouts").select("id, seller_store_id, status, net_payout_cents, created_at").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
+      section === "customers" ? supabase.from("profiles").select("id, full_name, phone, role, created_at", { count: "exact" }).order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null, count: 0 }),
+      section === "orders" ? supabase.from("order_requests").select("id, order_id, request_type, reason, status, created_at").eq("status", "pending").order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      section === "approvals" ? supabase.from("reviews").select("id, product_id, rating, title, body, created_at").eq("is_approved", false).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      section === "orders" ? supabase.from("refunds").select("id, order_id, amount_cents, reason, status, created_at").eq("status", "pending").order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      needsProducts ? supabase.from("product_images").select("product_id, storage_path, sort_order").order("sort_order").limit(500) : Promise.resolve({ data: [], error: null }),
     ]);
 
     if (sellerResult.error) setError(sellerResult.error.message);
@@ -80,12 +84,21 @@ export default function AdminMarketplaceTools({ section }: { section: Section })
     }
     setPendingOrders((orderResult.data ?? []).filter((order) => order.payment_status === "paid").length);
     setLoading(false);
-  }, []);
+  }, [section]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (section !== "approvals") return;
+    const supabase = createClient();
+    const channel = supabase.channel("admin-product-approval-feed")
+      .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => void load())
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [load, section]);
 
   async function reviewSeller(sellerId: string, approve: boolean) {
     setBusyId(sellerId);

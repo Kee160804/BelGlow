@@ -7,7 +7,7 @@ import { BadgePercent, BarChart3, ImagePlus, MessageSquareReply, Store, Users } 
 import { createClient } from "@/utils/supabase/client";
 
 type Section = "customers" | "reviews" | "promotions" | "analytics" | "store-profile" | "settings";
-type StoreRow = { id: string; name: string; description: string | null; support_email: string | null; support_phone: string | null; location: string | null; brand_story: string | null; logo_url: string | null; preparation_days_min: number; preparation_days_max: number; return_window_days: number; notification_preferences: Record<string, boolean> | null };
+type StoreRow = { id: string; name: string; description: string | null; support_email: string | null; support_phone: string | null; location: string | null; brand_story: string | null; logo_url: string | null; preparation_days_min: number; preparation_days_max: number; return_window_days: number; notification_preferences: Record<string, boolean> | null; delivery_areas: string | null; delivery_instructions: string | null };
 type SellerOrder = { id: string; order_id: string; seller_net_cents: number; item_subtotal_cents: number; platform_fee_cents: number; status: string; created_at: string };
 type ParentOrder = { id: string; email: string; order_number: number; created_at: string };
 type Review = { id: string; product_id: string; rating: number; title: string | null; body: string | null; created_at: string };
@@ -31,14 +31,21 @@ export default function SellerBusinessTools({ section }: { section: Section }) {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setError("Sign in again to manage your seller account."); setLoading(false); return; }
-    const { data: storeData, error: storeError } = await supabase.from("seller_stores").select("id, name, description, support_email, support_phone, location, brand_story, logo_url, preparation_days_min, preparation_days_max, return_window_days, notification_preferences").eq("owner_id", user.id).maybeSingle();
+    const storeResult = await supabase.from("seller_stores").select("id, name, description, support_email, support_phone, location, brand_story, logo_url, preparation_days_min, preparation_days_max, return_window_days, notification_preferences, delivery_areas, delivery_instructions").eq("owner_id", user.id).maybeSingle();
+    const legacyStoreResult = storeResult.error?.message.includes("delivery_areas")
+      ? await supabase.from("seller_stores").select("id, name, description, support_email, support_phone, location, brand_story, logo_url, preparation_days_min, preparation_days_max, return_window_days, notification_preferences").eq("owner_id", user.id).maybeSingle()
+      : null;
+    const storeData = storeResult.data ?? legacyStoreResult?.data;
+    const storeError = legacyStoreResult?.error ?? storeResult.error;
     if (storeError || !storeData) { setError(storeError?.message ?? "Seller store not found."); setLoading(false); return; }
-    const sellerStore = storeData as StoreRow;
+    const sellerStore = { ...storeData, delivery_areas: "delivery_areas" in storeData ? storeData.delivery_areas : null, delivery_instructions: "delivery_instructions" in storeData ? storeData.delivery_instructions : null } as StoreRow;
     setStore(sellerStore);
+    const needsOrders = section === "customers" || section === "analytics";
+    const needsProducts = section === "reviews";
     const [orderResult, productResult, promotionResult] = await Promise.all([
-      supabase.from("seller_orders").select("id, order_id, seller_net_cents, item_subtotal_cents, platform_fee_cents, status, created_at").eq("seller_store_id", sellerStore.id).order("created_at", { ascending: false }),
-      supabase.from("products").select("id, name").eq("seller_store_id", sellerStore.id),
-      supabase.from("promotions").select("id, code, name, discount_type, discount_value, starts_at, ends_at, usage_count, usage_limit, is_active").eq("seller_store_id", sellerStore.id).order("created_at", { ascending: false }),
+      needsOrders ? supabase.from("seller_orders").select("id, order_id, seller_net_cents, item_subtotal_cents, platform_fee_cents, status, created_at").eq("seller_store_id", sellerStore.id).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+      needsProducts ? supabase.from("products").select("id, name").eq("seller_store_id", sellerStore.id) : Promise.resolve({ data: [], error: null }),
+      section === "promotions" ? supabase.from("promotions").select("id, code, name, discount_type, discount_value, starts_at, ends_at, usage_count, usage_limit, is_active").eq("seller_store_id", sellerStore.id).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
     ]);
     const sellerOrders = (orderResult.data ?? []) as SellerOrder[];
     const products = productResult.data ?? [];
@@ -59,7 +66,7 @@ export default function SellerBusinessTools({ section }: { section: Section }) {
       } else setReplies(new Map());
     } else setReviews([]);
     setLoading(false);
-  }, []);
+  }, [section]);
 
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
 
@@ -84,14 +91,18 @@ export default function SellerBusinessTools({ section }: { section: Section }) {
     if (!store) return;
     const form = new FormData(event.currentTarget);
     setBusy("settings"); setError("");
-    const { error: saveError } = await createClient().rpc("save_seller_store_profile", {
+    const supabase = createClient();
+    const profileResult = await supabase.rpc("save_seller_store_profile", {
       store_name: store.name, store_description: store.description ?? "", store_support_email: store.support_email ?? "",
       store_support_phone: store.support_phone ?? "", store_location: store.location ?? "", store_brand_story: store.brand_story ?? "",
       prep_min: Number(form.get("prepMin")), prep_max: Number(form.get("prepMax")), return_days: Number(form.get("returnDays")),
       preferences: { new_orders: form.get("newOrders") === "on", low_stock: form.get("lowStock") === "on", reviews: form.get("reviews") === "on" },
     });
+    const fulfillmentResult = await supabase.rpc("save_seller_fulfillment_profile", { fulfillment_areas: form.get("deliveryAreas"), fulfillment_instructions: form.get("deliveryInstructions") });
     setBusy("");
-    if (saveError) setError(saveError.message); else { setNotice("Seller settings saved."); await load(); }
+    const missingMigration = fulfillmentResult.error?.message.includes("save_seller_fulfillment_profile");
+    const saveError = profileResult.error ?? (missingMigration ? null : fulfillmentResult.error);
+    if (saveError) setError(saveError.message); else { setNotice(missingMigration ? "Core settings saved. Fulfillment details will become available after the pending database migration is applied." : "Seller fulfillment settings saved."); await load(); }
   }
 
   async function uploadLogo(file: File) {
@@ -161,7 +172,7 @@ function Analytics({ orders }: { orders: SellerOrder[] }) { const gross = orders
 
 function StoreProfile({ store, busy, onSave, onLogo }: { store: StoreRow; busy: string; onSave: (event: FormEvent<HTMLFormElement>) => void; onLogo: (file: File) => void }) { return <form onSubmit={onSave} className="grid gap-5 xl:grid-cols-[280px_1fr]"><Panel><div className="relative mx-auto grid h-28 w-28 overflow-hidden place-items-center rounded-full bg-[#ead1cb] text-[#a95c59]">{store.logo_url ? <Image src={store.logo_url} alt={`${store.name} logo`} fill sizes="112px" className="object-cover" unoptimized /> : <Store size={44} />}</div><label className="mx-auto mt-4 flex w-fit cursor-pointer items-center gap-2 rounded-xl border border-[#d9c2bd] px-4 py-2.5 text-xs font-bold text-[#9b5a57]"><ImagePlus size={16} />{busy === "logo" ? "Uploading…" : "Upload logo"}<input type="file" accept="image/jpeg,image/png,image/webp,image/avif" disabled={busy === "logo"} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onLogo(file); }} className="sr-only" /></label><p className="mt-4 text-center text-xs text-[#817679]">Your store identity appears throughout the marketplace.</p></Panel><Panel><h2 className="text-lg font-bold">Public store details</h2><div className="mt-5 grid gap-4 sm:grid-cols-2"><Input name="name" label="Store name" placeholder="Store name" defaultValue={store.name} required /><Input name="email" label="Contact email" placeholder="hello@example.com" type="email" defaultValue={store.support_email ?? ""} /><Input name="phone" label="Contact phone" placeholder="+501" defaultValue={store.support_phone ?? ""} /><Input name="location" label="Location" placeholder="Belize City, Belize" defaultValue={store.location ?? ""} /><label className="text-sm font-semibold sm:col-span-2">Short description<textarea name="description" rows={3} defaultValue={store.description ?? ""} className="mt-2 w-full rounded-xl border border-[#ddd3d0] bg-[#fcfaf9] p-4 font-normal" /></label><label className="text-sm font-semibold sm:col-span-2">Brand story<textarea name="story" rows={6} defaultValue={store.brand_story ?? ""} className="mt-2 w-full rounded-xl border border-[#ddd3d0] bg-[#fcfaf9] p-4 font-normal" /></label><input type="hidden" name="prepMin" value={store.preparation_days_min} /><input type="hidden" name="prepMax" value={store.preparation_days_max} /><input type="hidden" name="returnDays" value={store.return_window_days} /></div><button disabled={busy === "profile"} className="mt-5 rounded-xl bg-[#bf6d68] px-6 py-3 font-bold text-white disabled:opacity-50">{busy === "profile" ? "Saving…" : "Save profile"}</button></Panel></form>; }
 
-function Settings({ store, busy, onSave }: { store: StoreRow; busy: string; onSave: (event: FormEvent<HTMLFormElement>) => void }) { const preferences = store.notification_preferences ?? {}; return <form onSubmit={onSave} className="grid gap-5 xl:grid-cols-2"><Panel><h2 className="text-lg font-bold">Notifications</h2><Toggle name="newOrders" label="New order alerts" detail="Receive dashboard alerts whenever a customer orders." checked={preferences.new_orders ?? true} /><Toggle name="lowStock" label="Low-stock alerts" detail="Know when inventory reaches its reorder point." checked={preferences.low_stock ?? true} /><Toggle name="reviews" label="Review alerts" detail="Know when a customer leaves feedback." checked={preferences.reviews ?? true} /></Panel><Panel><h2 className="text-lg font-bold">Fulfillment</h2><div className="mt-5 grid grid-cols-2 gap-4"><Input name="prepMin" label="Minimum preparation days" placeholder="1" type="number" defaultValue={String(store.preparation_days_min)} required /><Input name="prepMax" label="Maximum preparation days" placeholder="2" type="number" defaultValue={String(store.preparation_days_max)} required /><Input name="returnDays" label="Return window (days)" placeholder="14" type="number" defaultValue={String(store.return_window_days)} required /></div><button disabled={busy === "settings"} className="mt-5 rounded-xl bg-[#bf6d68] px-6 py-3 font-bold text-white disabled:opacity-50">{busy === "settings" ? "Saving…" : "Save settings"}</button><div className="mt-7 border-t border-[#eee5e1] pt-5"><h3 className="font-bold">Account security</h3><Link href="/auth/update-password" className="mt-3 inline-block rounded-xl border border-[#d9c2bd] px-4 py-2.5 text-sm font-bold text-[#9b5a57]">Change password</Link></div></Panel></form>; }
+function Settings({ store, busy, onSave }: { store: StoreRow; busy: string; onSave: (event: FormEvent<HTMLFormElement>) => void }) { const preferences = store.notification_preferences ?? {}; return <form onSubmit={onSave} className="grid gap-5 xl:grid-cols-2"><Panel><h2 className="text-lg font-bold">Notifications</h2><Toggle name="newOrders" label="New order alerts" detail="Receive dashboard alerts whenever a customer orders." checked={preferences.new_orders ?? true} /><Toggle name="lowStock" label="Low-stock alerts" detail="Know when inventory reaches its reorder point." checked={preferences.low_stock ?? true} /><Toggle name="reviews" label="Review alerts" detail="Know when a customer leaves feedback." checked={preferences.reviews ?? true} /></Panel><Panel><h2 className="text-lg font-bold">Seller fulfillment</h2><p className="mt-2 text-sm leading-6 text-[#756a6d]">You are responsible for preparing each order and arranging delivery or pickup directly with the customer.</p><div className="mt-5 grid grid-cols-2 gap-4"><Input name="prepMin" label="Minimum preparation days" placeholder="1" type="number" defaultValue={String(store.preparation_days_min)} required /><Input name="prepMax" label="Maximum preparation days" placeholder="2" type="number" defaultValue={String(store.preparation_days_max)} required /><Input name="returnDays" label="Return window (days)" placeholder="14" type="number" defaultValue={String(store.return_window_days)} required /></div><label className="mt-4 block text-sm font-semibold">Delivery and pickup coverage<textarea name="deliveryAreas" rows={3} maxLength={1000} defaultValue={store.delivery_areas ?? ""} placeholder="Areas served and pickup availability" className="mt-2 w-full rounded-xl border border-[#ddd3d0] bg-[#fcfaf9] p-4 font-normal" /></label><label className="mt-4 block text-sm font-semibold">Customer fulfillment information<textarea name="deliveryInstructions" rows={4} maxLength={2000} defaultValue={store.delivery_instructions ?? ""} placeholder="How you arrange delivery, expected contact time, and any separate delivery charges" className="mt-2 w-full rounded-xl border border-[#ddd3d0] bg-[#fcfaf9] p-4 font-normal" /></label><button disabled={busy === "settings"} className="mt-5 rounded-xl bg-[#bf6d68] px-6 py-3 font-bold text-white disabled:opacity-50">{busy === "settings" ? "Saving…" : "Save fulfillment settings"}</button><div className="mt-7 border-t border-[#eee5e1] pt-5"><h3 className="font-bold">Account security</h3><Link href="/auth/update-password" className="mt-3 inline-block rounded-xl border border-[#d9c2bd] px-4 py-2.5 text-sm font-bold text-[#9b5a57]">Change password</Link></div></Panel></form>; }
 
 function Panel({ children }: { children: React.ReactNode }) { return <section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm">{children}</section>; }
 function Empty({ text }: { text: string }) { return <p className="rounded-xl bg-[#faf6f4] p-5 text-sm text-[#756a6d]">{text}</p>; }

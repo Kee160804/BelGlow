@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Heart, Menu, Search, ShoppingBag, UserRound, X } from "lucide-react";
 import { useStore } from "@/components/providers/StoreProvider";
 
@@ -16,8 +16,8 @@ const navigation = [
   { label: "Home", href: "/" },
   { label: "Shop", href: "/shop" },
   { label: "Categories", href: "/categories" },
-  { label: "About", href: "/#about" },
-  { label: "Blog", href: "/#blog" },
+  { label: "About", href: "/about" },
+  { label: "Contact", href: "/contact" },
 ];
 
 export default function SiteHeader({
@@ -30,23 +30,7 @@ export default function SiteHeader({
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [localQuery, setLocalQuery] = useState(query);
-  const [activeHash, setActiveHash] = useState("");
   const currentQuery = onQuery ? query : localQuery;
-
-  useEffect(() => {
-    function syncHash() {
-      setActiveHash(window.location.hash);
-    }
-
-    const initialSync = window.setTimeout(syncHash, 0);
-    window.addEventListener("hashchange", syncHash);
-    window.addEventListener("popstate", syncHash);
-    return () => {
-      window.clearTimeout(initialSync);
-      window.removeEventListener("hashchange", syncHash);
-      window.removeEventListener("popstate", syncHash);
-    };
-  }, []);
 
   function updateQuery(value: string) {
     if (onQuery) onQuery(value);
@@ -66,14 +50,12 @@ export default function SiteHeader({
   const accountLabel = userRole === "admin" ? "Admin dashboard" : userRole === "seller" ? "Seller dashboard" : userName ? "My account" : "Sign in or create account";
 
   function isActiveNavigation(href: string) {
-    if (href === "/") return pathname === "/" && activeHash !== "#about" && activeHash !== "#blog";
-    if (href.startsWith("/#")) return pathname === "/" && activeHash === href.slice(1);
+    if (href === "/") return pathname === "/";
     return pathname === href || pathname.startsWith(`${href}/`);
   }
 
-  function selectNavigation(href: string) {
+  function selectNavigation(_href: string) {
     setMenuOpen(false);
-    setActiveHash(href.startsWith("/#") ? href.slice(1) : "");
   }
 
   // Pages without an in-place product grid send search requests to the main shop.
@@ -90,12 +72,12 @@ export default function SiteHeader({
 
   return (
     <header className="relative z-50 border-b border-[#f3e4e8] bg-white">
-      <div className="flex h-[78px] items-center gap-5 px-5 sm:px-8 lg:h-[92px] lg:px-16">
-        <Link href="/" aria-label="BelGlow home" className="mr-auto flex shrink-0 items-center gap-2.5">
-          <BrandMark />
+      <div className="flex h-[78px] items-center gap-1 px-3 min-[390px]:gap-2 sm:gap-5 sm:px-8 lg:h-[92px] lg:px-16">
+        <Link href="/" aria-label="BelGlow home" className="mr-auto flex min-w-0 shrink items-center gap-1.5 min-[390px]:gap-2.5">
+          <span className="-mx-1 scale-90 min-[390px]:mx-0 min-[390px]:scale-100"><BrandMark /></span>
           <div>
-            <p className="text-[24px] font-extrabold leading-none tracking-[-.05em] sm:text-[28px]">Bel<span className="text-[#eb3f70]">Glow</span></p>
-            <p className="mt-1 text-[7px] font-bold uppercase tracking-[.19em] text-[#ed4c77] sm:text-[8px]">Belizean beauty. Naturally you.</p>
+            <p className="text-[21px] font-extrabold leading-none tracking-[-.05em] min-[390px]:text-[24px] sm:text-[28px]">Bel<span className="text-[#eb3f70]">Glow</span></p>
+            <p className="mt-1 hidden text-[7px] font-bold uppercase tracking-[.19em] text-[#ed4c77] min-[390px]:block sm:text-[8px]">Belizean beauty. Naturally you.</p>
           </div>
         </Link>
 
@@ -114,12 +96,12 @@ export default function SiteHeader({
           <button onClick={openCart} aria-label={`Shopping bag with ${cart.length} items`} className="relative rounded-full p-2 transition hover:bg-[#fff1f5] hover:text-[#ed4773]"><ShoppingBag size={21} />{cart.length > 0 && <Badge count={cart.length} />}</button>
         </div>
 
-        <button onClick={openWishlist} aria-label={`Open saved products with ${favoriteIds.length} items`} className="relative rounded-full p-2 sm:hidden"><Heart size={22} />{favoriteIds.length > 0 && <Badge count={favoriteIds.length} />}</button>
-        <button onClick={openCart} aria-label={`Shopping bag with ${cart.length} items`} className="relative rounded-full p-2 sm:hidden"><ShoppingBag size={22} />{cart.length > 0 && <Badge count={cart.length} />}</button>
-        <button onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-label="Toggle navigation menu" className="rounded-full p-2 xl:hidden">{menuOpen ? <X size={23} /> : <Menu size={23} />}</button>
+        <button onClick={openWishlist} aria-label={`Open saved products with ${favoriteIds.length} items`} className="relative grid min-h-11 min-w-11 place-items-center rounded-full sm:hidden"><Heart size={21} />{favoriteIds.length > 0 && <Badge count={favoriteIds.length} />}</button>
+        <button onClick={openCart} aria-label={`Shopping bag with ${cart.length} items`} className="relative grid min-h-11 min-w-11 place-items-center rounded-full sm:hidden"><ShoppingBag size={21} />{cart.length > 0 && <Badge count={cart.length} />}</button>
+        <button onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-label="Toggle navigation menu" className="grid min-h-11 min-w-11 place-items-center rounded-full xl:hidden">{menuOpen ? <X size={22} /> : <Menu size={22} />}</button>
       </div>
 
-      {menuOpen && <div className="absolute left-4 right-4 top-[70px] rounded-2xl border border-[#f0dce2] bg-white p-4 shadow-2xl xl:hidden">
+      {menuOpen && <div className="absolute left-2 right-2 top-[72px] max-h-[calc(100dvh-80px)] overflow-y-auto rounded-2xl border border-[#f0dce2] bg-white p-3 shadow-2xl min-[390px]:left-4 min-[390px]:right-4 min-[390px]:p-4 xl:hidden">
         <form onSubmit={submitSearch} className="mb-3 flex items-center rounded-full bg-[#fff6f8] px-4 lg:hidden">
           <input value={currentQuery} onChange={(event) => updateQuery(event.target.value)} aria-label="Search beauty and self-care products" placeholder="Search products..." className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" />
           <button aria-label="Submit search"><Search size={19} /></button>

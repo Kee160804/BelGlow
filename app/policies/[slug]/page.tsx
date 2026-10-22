@@ -1,0 +1,8 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import SiteHeader from "@/components/layout/SiteHeader";
+import { policies, type PolicySlug } from "@/lib/policies";
+
+export async function generateMetadata({ params }: PageProps<"/policies/[slug]">): Promise<Metadata> { const { slug } = await params; const policy = policies[slug as PolicySlug]; return policy ? { title: `${policy.title} | BelGlow`, description: policy.summary } : {}; }
+export default async function PolicyPage({ params }: PageProps<"/policies/[slug]">) { const { slug } = await params; const policy = policies[slug as PolicySlug]; if (!policy) notFound(); return <main className="min-h-screen bg-[#fffdfd]"><SiteHeader /><article className="mx-auto max-w-4xl px-5 py-14 sm:px-10 lg:py-20"><Link href="/policies" className="text-sm font-bold text-[#df3c69]">← All policies</Link><p className="mt-8 text-xs font-bold uppercase tracking-[.24em] text-[#e43f6b]">BelGlow marketplace policy</p><h1 className="mt-3 text-5xl font-black tracking-[-.05em]">{policy.title}</h1><p className="mt-4 text-lg leading-8 text-[#706469]">{policy.summary}</p><p className="mt-3 text-xs text-[#918589]">Effective October 21, 2026</p><div className="mt-10 space-y-5">{policy.sections.map(([title, body]) => <section key={title} className="rounded-[22px] border border-[#ecdce1] bg-white p-6 sm:p-8"><h2 className="text-xl font-black">{title}</h2><p className="mt-3 leading-7 text-[#695e62]">{body}</p></section>)}</div><p className="mt-8 rounded-2xl bg-[#fff1f5] p-5 text-sm leading-6 text-[#6d6065]">Questions about this policy? <Link href="/contact" className="font-bold text-[#df3c69] underline">Contact BelGlow support.</Link></p></article></main>; }

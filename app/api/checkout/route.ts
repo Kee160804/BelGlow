@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { createClient } from "@/utils/supabase/server";
 
 type CheckoutBody = {
@@ -33,6 +34,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Complete your contact, delivery, and cart information." }, { status: 400 });
   }
 
+  const supabase = await createClient();
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const fingerprint = createHash("sha256").update(`${forwarded}:${String(body.email).trim().toLowerCase()}`).digest("hex");
+  const { data: allowed } = await supabase.rpc("consume_public_rate_limit", { rate_bucket: "checkout", rate_subject_hash: fingerprint, rate_max_requests: 12, rate_window_seconds: 3600 });
+  if (!allowed) return NextResponse.json({ error: "Too many checkout attempts. Please wait before trying again." }, { status: 429 });
+
   // Manual/cash-on-delivery is the safe built-in provider. A card processor can
   // replace this through PAYMENT_PROVIDER without sending card data to BelGlow.
   const provider = (process.env.PAYMENT_PROVIDER || "cash_on_delivery").trim().toLowerCase();
@@ -40,7 +47,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `The ${provider} payment adapter must be connected before checkout can use it.` }, { status: 503 });
   }
 
-  const supabase = await createClient();
   const { data, error } = await supabase.rpc("create_marketplace_order", {
     checkout_items: items.map((item) => ({ variant_id: item.variantId, quantity: item.quantity })),
     checkout_email: body.email,

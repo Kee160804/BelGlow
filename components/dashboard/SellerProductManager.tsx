@@ -89,6 +89,14 @@ export default function SellerProductManager({ mode }: { mode: "list" | "create"
 
   useEffect(() => { const timer = window.setTimeout(() => void loadProducts(), 0); return () => window.clearTimeout(timer); }, [loadProducts]);
 
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase.channel("seller-product-review-feed")
+      .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => void loadProducts())
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [loadProducts]);
+
   async function submit(event: FormEvent<HTMLFormElement>, product?: SellerProduct) {
     event.preventDefault();
     setSaving(true); setError(""); setMessage("");

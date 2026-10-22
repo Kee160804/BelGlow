@@ -2,14 +2,19 @@
 
 :root { --ink: #211a1d; --pink: #f14f78; }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 96px; }
+html { min-width: 320px; overflow-x: hidden; scroll-behavior: smooth; scroll-padding-top: 96px; }
 body {
   margin: 0;
+  min-width: 320px;
+  min-height: 100dvh;
+  overflow-x: hidden;
   background: #f8cbd4;
   color: var(--ink);
   font-family: var(--font-dm-sans), Arial, sans-serif;
 }
-button, input { font: inherit; }
+button, input, select, textarea { font: inherit; }
+img, svg, video { max-width: 100%; }
+h1, h2, h3, p, a { overflow-wrap: anywhere; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
 ::selection { background: #f8a8bd; color: #35151e; }
@@ -30,6 +35,26 @@ button { cursor: pointer; }
 }
 .frame-fab { right: 12px; }
 
+/* Installed PWAs and notched phones keep controls clear of system UI. */
+@supports (padding: env(safe-area-inset-bottom)) {
+  body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  footer { padding-bottom: max(2.5rem, env(safe-area-inset-bottom)); }
+}
+
+@media (display-mode: standalone) {
+  html { background: #fffaf8; }
+  body { overscroll-behavior-y: none; }
+}
+
+@media (pointer: coarse) {
+  button, [role="button"], input, select { min-height: 44px; }
+}
+
+/* Prevent iOS form-focus zoom while keeping compact desktop controls intact. */
+@media (max-width: 639px) {
+  input, select, textarea { font-size: 16px; }
+}
+
 @media (min-width: 640px) {
   .frame-panel {
     inset: 112px 20px auto auto;
@@ -47,4 +72,8 @@ button { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; }
+}
+
+@media print {
+  .pwa-install, .frame-fab { display: none !important; }
 }

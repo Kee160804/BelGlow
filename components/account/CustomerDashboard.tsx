@@ -78,12 +78,16 @@ export default function CustomerDashboard({ name, email, phone, role, orders, ad
     setBusy(""); if (reviewError) setError(reviewError.message); else setNotice("Review submitted for approval. Thank you!");
   }
 
-  async function requestCancellation(orderId: string) {
-    const reason = window.prompt("Tell BelGlow why you want to cancel this order:"); if (!reason?.trim()) return;
+  async function requestOrderAction(orderId: string, requestType: "cancel" | "return" | "refund") {
+    const reason = window.prompt(`Tell BelGlow why you want to request this ${requestType}:`); if (!reason?.trim()) return;
     setBusy(orderId); const supabase = createClient(); const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setBusy(""); setError("Sign in again to send this request."); return; }
-    const { error: requestError } = await supabase.from("order_requests").insert({ order_id: orderId, user_id: user.id, request_type: "cancel", reason: reason.trim() });
-    setBusy(""); if (requestError) setError(requestError.message); else setNotice("Cancellation request sent to BelGlow.");
+    const { error: requestError } = await supabase.from("order_requests").insert({ order_id: orderId, user_id: user.id, request_type: requestType, reason: reason.trim() });
+    setBusy(""); if (requestError) setError(requestError.message); else setNotice(`${requestType.charAt(0).toUpperCase() + requestType.slice(1)} request sent to BelGlow for review with the seller.`);
+  }
+
+  async function requestCancellation(orderId: string) {
+    await requestOrderAction(orderId, "cancel");
   }
 
   return <main className="min-h-screen bg-[#fbf6f4]">

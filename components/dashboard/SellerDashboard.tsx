@@ -2,26 +2,29 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import {
   ArrowUpRight, BarChart3, BadgePercent, Boxes, ChevronDown,
-  CircleDollarSign, House, LogOut, Menu, Package, Plus, Search,
+  House, LogOut, Menu, Package, Plus, Search,
   Settings, ShoppingBag, Star, Store, Users, WalletCards, X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/components/providers/StoreProvider";
-import SellerProductManager from "@/components/dashboard/SellerProductManager";
-import SellerOperations from "@/components/dashboard/SellerOperations";
+import { createClient } from "@/utils/supabase/client";
 import SellerOverview from "@/components/dashboard/SellerOverview";
 import DashboardSwitcher from "@/components/dashboard/DashboardSwitcher";
-import SellerBusinessTools from "@/components/dashboard/SellerBusinessTools";
 import NotificationBell from "@/components/dashboard/NotificationBell";
+
+const SellerProductManager = dynamic(() => import("@/components/dashboard/SellerProductManager"));
+const SellerOperations = dynamic(() => import("@/components/dashboard/SellerOperations"));
+const SellerBusinessTools = dynamic(() => import("@/components/dashboard/SellerBusinessTools"));
 
 const navigation = [
   { label: "Dashboard", href: "/dashboard", icon: House },
   { label: "Products", href: "/dashboard/products", icon: Package },
   { label: "Add product", href: "/dashboard/add-product", icon: Plus },
-  { label: "Orders", href: "/dashboard/orders", icon: ShoppingBag, badge: "3" },
+  { label: "Orders", href: "/dashboard/orders", icon: ShoppingBag },
   { label: "Inventory", href: "/dashboard/inventory", icon: Boxes },
   { label: "Customers", href: "/dashboard/customers", icon: Users },
   { label: "Reviews", href: "/dashboard/reviews", icon: Star },
@@ -32,20 +35,6 @@ const navigation = [
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ] as const;
 
-const recentOrders = [
-  ["#BG12456", "Janelle P.", "2 items", "BZ$48.50", "Processing", "Oct 1, 2026"],
-  ["#BG12455", "Daniela M.", "1 item", "BZ$22.00", "Shipped", "Sep 30, 2026"],
-  ["#BG12454", "Kayla R.", "3 items", "BZ$75.20", "Pending", "Sep 30, 2026"],
-  ["#BG12453", "Marcos B.", "1 item", "BZ$18.00", "Delivered", "Sep 29, 2026"],
-] as const;
-
-const topProducts = [
-  ["Hydrating Glow Serum", "125 sold", "BZ$1,875.00", "29% center"],
-  ["Brightening Face Cream", "98 sold", "BZ$1,470.00", "50% center"],
-  ["Nourishing Body Oil", "86 sold", "BZ$1,118.00", "84% center"],
-  ["Aloe & Shea Body Lotion", "64 sold", "BZ$768.00", "66% center"],
-] as const;
-
 export default function SellerDashboard({ accountRole, initialUserName }: { accountRole: "seller" | "admin"; initialUserName: string }) {
   const { userName: liveUserName, userRole: liveUserRole, openAuth, signOut } = useStore();
   const userName = liveUserName ?? initialUserName;
@@ -53,7 +42,53 @@ export default function SellerDashboard({ accountRole, initialUserName }: { acco
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [openOrderCount, setOpenOrderCount] = useState(0);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    let active = true;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    async function connectOrderCount() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !active) return;
+
+      const { data: store } = await supabase
+        .from("seller_stores")
+        .select("id")
+        .eq("owner_id", user.id)
+        .maybeSingle();
+      if (!store || !active) return;
+      const storeId = store.id;
+
+      async function refreshCount() {
+        const { count } = await supabase
+          .from("seller_orders")
+          .select("id", { count: "exact", head: true })
+          .eq("seller_store_id", storeId)
+          .in("status", ["new", "accepted", "processing", "shipped"]);
+        if (active) setOpenOrderCount(count ?? 0);
+      }
+
+      await refreshCount();
+      if (!active) return;
+      channel = supabase
+        .channel(`seller-order-count-${storeId}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "seller_orders", filter: `seller_store_id=eq.${storeId}` },
+          () => void refreshCount(),
+        )
+        .subscribe();
+    }
+
+    void connectOrderCount();
+    return () => {
+      active = false;
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     function closeAccountMenu(event: PointerEvent) {
@@ -86,15 +121,15 @@ export default function SellerDashboard({ accountRole, initialUserName }: { acco
     </main>;
   }
 
-  return <main className="h-screen overflow-hidden bg-[#efe4df] p-0 text-[#292527] lg:p-5">
-    <div className="mx-auto grid h-screen min-h-0 max-w-[1600px] overflow-hidden bg-[#faf7f5] shadow-[0_26px_90px_rgba(76,46,40,.16)] lg:h-[calc(100vh-40px)] lg:grid-cols-[244px_1fr] lg:rounded-[28px]">
+  return <main className="h-dvh overflow-hidden bg-[#efe4df] p-0 text-[#292527] lg:p-5">
+    <div className="mx-auto grid h-dvh min-h-0 max-w-[1600px] overflow-hidden bg-[#faf7f5] shadow-[0_26px_90px_rgba(76,46,40,.16)] lg:h-[calc(100dvh-40px)] lg:grid-cols-[244px_1fr] lg:rounded-[28px]">
       <aside className={`fixed inset-y-0 left-0 z-50 flex h-full w-[270px] flex-col overflow-hidden border-r border-[#eadeda] bg-[#fbf6f3] p-5 transition-transform lg:static lg:w-auto lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between px-2 py-2">
           <Link href="/" className="flex items-center gap-2" aria-label="BelGlow marketplace"><BrandMark /><div><p className="font-serif text-3xl leading-none">Bel<span className="text-[#b86160]">Glow</span></p><p className="mt-1 text-[7px] font-bold uppercase tracking-[.26em] text-[#9b6461]">Beauty beyond borders</p></div></Link>
           <button onClick={() => setMenuOpen(false)} className="rounded-full p-2 lg:hidden" aria-label="Close navigation"><X size={21} /></button>
         </div>
         <nav className="mt-7 space-y-1" aria-label="Seller navigation">
-          {navigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.label} href={item.href} onClick={() => setMenuOpen(false)} aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${active ? "bg-[#dca9a2] text-white shadow-sm" : "text-[#393438] hover:bg-[#f3e7e3]"}`}><Icon size={19} /><span className="flex-1">{item.label}</span>{"badge" in item && <span className={`rounded-md px-1.5 py-0.5 text-xs ${active ? "bg-white/25 text-white" : "bg-[#c88e85] text-white"}`}>{item.badge}</span>}</Link>; })}
+          {navigation.map((item) => { const Icon = item.icon; const active = pathname === item.href; const badge = item.href === "/dashboard/orders" && openOrderCount > 0 ? openOrderCount : null; return <Link key={item.label} href={item.href} onClick={() => setMenuOpen(false)} aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${active ? "bg-[#dca9a2] text-white shadow-sm" : "text-[#393438] hover:bg-[#f3e7e3]"}`}><Icon size={19} /><span className="flex-1">{item.label}</span>{badge !== null && <span className={`rounded-md px-1.5 py-0.5 text-xs ${active ? "bg-white/25 text-white" : "bg-[#c88e85] text-white"}`}>{badge}</span>}</Link>; })}
         </nav>
         <div className="mt-auto rounded-2xl border border-[#eadbd6] bg-white/70 p-4">
           <p className="text-sm font-bold">{userRole === "admin" ? "BelGlow Official Store" : "Seller storefront"}</p>
@@ -127,35 +162,6 @@ export default function SellerDashboard({ accountRole, initialUserName }: { acco
         </header>
 
         {pathname === "/dashboard" ? <SellerOverview userName={userName} /> : <SectionWorkspace section={pathname.split("/").filter(Boolean).at(-1) ?? "dashboard"} />}
-        {/* Legacy visual dashboard retained below as a non-rendered reference during migration. */}
-        {false && pathname === "/dashboard" ? <div className="p-4 sm:p-7 lg:p-8">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <div><p className="text-sm text-[#8b7877]">Thursday, October 1</p><h1 className="mt-1 font-serif text-3xl font-semibold tracking-[-.025em] sm:text-4xl">Good morning, {userName} <span aria-hidden>👋</span></h1><p className="mt-1 text-[#695f62]">Here&apos;s what&apos;s happening with your store today.</p></div>
-            <Link href="/dashboard/add-product" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#bf6d68] px-5 py-3 font-bold text-white shadow-[0_10px_24px_rgba(191,109,104,.22)]"><Plus size={20} /> Add product</Link>
-          </div>
-
-          <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Store summary">
-            <StatCard icon={<ShoppingBag />} label="Gross sales" value="BZ$4,280" change="12%" />
-            <StatCard icon={<Package />} label="Total orders" value="126" change="18%" />
-            <StatCard icon={<BadgePercent />} label="BelGlow commission (15%)" value="BZ$642" change="Included" subtle />
-            <StatCard icon={<WalletCards />} label="Your earnings" value="BZ$3,638" change="14%" />
-          </section>
-
-          <div className="mt-4 grid gap-4 xl:grid-cols-[1.55fr_.9fr]">
-            <section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between"><div><h2 className="text-lg font-bold">Sales overview</h2><p className="text-sm text-[#7b7072]">Gross sales for the last 30 days</p></div><button className="rounded-lg border border-[#ded5d2] px-3 py-2 text-xs font-semibold">Last 30 days</button></div>
-              <div className="mt-5 h-[220px] w-full"><svg viewBox="0 0 720 220" className="h-full w-full" role="img" aria-label="Sales rose from BZ$100 to BZ$760 during September"><defs><linearGradient id="sales-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#c87870" stopOpacity=".3" /><stop offset="1" stopColor="#c87870" stopOpacity=".02" /></linearGradient></defs>{[30,75,120,165,210].map((y) => <line key={y} x1="44" y1={y} x2="700" y2={y} stroke="#eee5e1" />)}<path d="M44 182 L96 158 L148 148 L200 121 L252 156 L304 116 L356 88 L408 120 L460 94 L512 73 L564 96 L616 40 L662 60 L700 16 L700 210 L44 210 Z" fill="url(#sales-fill)" /><path d="M44 182 L96 158 L148 148 L200 121 L252 156 L304 116 L356 88 L408 120 L460 94 L512 73 L564 96 L616 40 L662 60 L700 16" fill="none" stroke="#bd675f" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg></div>
-            </section>
-
-            <section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm"><h2 className="text-lg font-bold">Order status</h2><div className="mt-7 flex flex-col items-center gap-6 sm:flex-row sm:justify-center"><div className="relative grid h-36 w-36 place-items-center rounded-full bg-[conic-gradient(#87bb94_0_49%,#edcfbe_49%_71%,#ead8d0_71%_87%,#ce7d76_87%_97%,#f2e7e2_97%)]"><div className="grid h-24 w-24 place-items-center rounded-full bg-white text-center"><p className="text-2xl font-black">126<span className="block text-xs font-normal">Orders</span></p></div></div><div className="space-y-2.5 text-sm"><Legend color="#ce7d76" label="Pending" value="12" /><Legend color="#edcfbe" label="Processing" value="28" /><Legend color="#87bb94" label="Shipped" value="62" /><Legend color="#ead8d0" label="Delivered" value="20" /></div></div></section>
-          </div>
-
-          <div className="mt-4 grid gap-4 xl:grid-cols-[1.3fr_.8fr_.72fr]">
-            <section className="overflow-hidden rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm"><SectionTitle title="Recent orders" href="/dashboard/orders" /><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-xs"><thead className="bg-[#faf6f4] text-[#766c6e]"><tr>{["Order", "Customer", "Items", "Total", "Status", "Date"].map((heading) => <th key={heading} className="px-3 py-3 font-semibold">{heading}</th>)}</tr></thead><tbody>{recentOrders.map((order) => <tr key={order[0]} className="border-t border-[#eee5e1]"><td className="px-3 py-3 font-semibold text-[#b45f5c] underline">{order[0]}</td><td className="px-3">{order[1]}</td><td className="px-3">{order[2]}</td><td className="px-3 font-semibold">{order[3]}</td><td className="px-3"><StatusBadge status={order[4]} /></td><td className="px-3 text-[#70676a]">{order[5]}</td></tr>)}</tbody></table></div></section>
-            <section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm"><SectionTitle title="Top products" href="/dashboard/products" /> <div className="mt-3 divide-y divide-[#eee5e1]">{topProducts.map((product) => <div key={product[0]} className="flex items-center gap-3 py-2.5"><ProductThumb position={product[3]} /><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{product[0]}</p><p className="text-[11px] text-[#857a7c]">{product[1]}</p></div><p className="text-xs font-bold">{product[2]}</p></div>)}</div></section>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1"><section className="rounded-2xl bg-[linear-gradient(135deg,#eed3cb,#dca7a0)] p-5"><p className="text-xs font-bold uppercase tracking-[.16em] text-[#8e524f]">Grow your store</p><h2 className="mt-2 font-serif text-2xl font-semibold">List your next bestseller</h2><p className="mt-2 text-xs leading-5 text-[#695354]">Add products and reach beauty shoppers across Belize.</p><Link href="/dashboard/add-product" className="mt-5 inline-block rounded-lg border border-[#a95d58] bg-white/75 px-4 py-2 text-xs font-bold text-[#9c5552]">Add new product</Link></section><section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm"><SectionTitle title="Payout" href="/dashboard/payouts" /><p className="mt-5 text-xs text-[#786e70]">Available balance</p><p className="mt-1 font-serif text-3xl font-bold">BZ$1,245.00</p><p className="mt-2 flex items-center gap-1 text-xs font-semibold text-emerald-700"><CircleDollarSign size={14} /> After commission</p><Link href="/dashboard/payouts" className="mt-4 block w-full rounded-xl bg-[#bf6d68] py-3 text-center text-sm font-bold text-white">View payout details</Link></section></div>
-          </div>
-        </div> : null}
       </div>
     </div>
   </main>;
@@ -202,8 +208,6 @@ const sellerProducts = [
   ["Nourishing Body Oil", "Body care", "86", "5", "BZ$13.00", "Low stock", "84% center"],
   ["Aloe & Shea Body Lotion", "Body care", "64", "8", "BZ$12.00", "Active", "66% center"],
 ] as const;
-
-function OrdersPage() { return <Panel><div className="grid gap-3 sm:grid-cols-3"><MiniStat label="Open orders" value="40" /><MiniStat label="Ready to ship" value="12" /><MiniStat label="Completed this month" value="86" /></div><div className="mt-5"><Toolbar placeholder="Search order or customer" filter="All statuses" /></div><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><TableHead labels={["Order", "Customer", "Items", "Total", "Status", "Date"]} /><tbody>{recentOrders.map((order) => <tr key={order[0]} className="border-t border-[#eee5e1]"><td className="px-4 py-4 font-semibold text-[#ad5d59] underline">{order[0]}</td><td className="px-4">{order[1]}</td><td className="px-4">{order[2]}</td><td className="px-4 font-semibold">{order[3]}</td><td className="px-4"><StatusBadge status={order[4]} /></td><td className="px-4 text-[#70676a]">{order[5]}</td></tr>)}</tbody></table></div></Panel>; }
 
 function InventoryPage() { return <div className="grid gap-5 xl:grid-cols-[1fr_300px]"><Panel><Toolbar placeholder="Search inventory" filter="Stock level" /><div className="mt-5 divide-y divide-[#eee5e1]">{sellerProducts.map((product, index) => <div key={product[0]} className="grid grid-cols-[auto_1fr_auto] items-center gap-4 py-4"><ProductThumb position={product[6]} /><div><p className="font-semibold">{product[0]}</p><p className="text-xs text-[#817679]">{product[1]} · SKU BG-10{index + 1}</p></div><div className="text-right"><p className={`font-bold ${Number(product[3]) <= 8 ? "text-orange-700" : "text-emerald-700"}`}>{product[3]} in stock</p><button className="text-xs font-semibold text-[#ac5c58] underline">Update</button></div></div>)}</div></Panel><Panel><h2 className="font-bold">Low-stock alerts</h2><p className="mt-2 text-sm leading-6 text-[#756a6d]">3 products are at or below their reorder point.</p><button className="mt-5 w-full rounded-xl bg-[#bf6d68] py-3 text-sm font-bold text-white">Review low stock</button></Panel></div>; }
 

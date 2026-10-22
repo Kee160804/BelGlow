@@ -93,10 +93,6 @@ export default function Storefront({ initialCategory = "All", initialQuery = "" 
           )}
         </section>
 
-        <footer id="about" className="flex flex-col gap-3 border-t border-[#f0e2e6] bg-[#fff8fa] px-6 py-7 text-sm text-[#756b70] sm:flex-row sm:items-center sm:justify-between sm:px-10 lg:px-16">
-          <p><strong className="text-[#2c2226]">BelGlow</strong> — Belizean beauty, naturally you.</p>
-          <p id="blog">Gentle formulas • Cruelty free • Dermatologist trusted</p>
-        </footer>
       </div>
 
       {toast && <div role="status" className="toast-in fixed bottom-6 left-1/2 z-[80] -translate-x-1/2 rounded-full bg-[#241a1e] px-5 py-3 text-sm font-semibold text-white shadow-xl">{toast}</div>}
