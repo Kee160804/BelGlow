@@ -18,6 +18,7 @@ alter table public.shipments
 create unique index if not exists shipments_order_seller_idx
   on public.shipments(order_id, seller_store_id) where seller_store_id is not null;
 
+drop policy if exists "Sellers read own shipment records" on public.shipments;
 create policy "Sellers read own shipment records" on public.shipments
   for select to authenticated using (
     seller_store_id is not null and public.owns_seller_store(seller_store_id)
@@ -214,9 +215,11 @@ create table if not exists public.notification_outbox (
 );
 create index if not exists notification_outbox_pending_idx on public.notification_outbox(status, created_at);
 alter table public.notification_outbox enable row level security;
+drop policy if exists "admins read notification outbox" on public.notification_outbox;
 create policy "admins read notification outbox" on public.notification_outbox for select to authenticated using (public.is_admin());
 revoke all on public.notification_outbox from public, anon, authenticated;
 grant select on public.notification_outbox to authenticated;
+drop trigger if exists notification_outbox_updated_at on public.notification_outbox;
 create trigger notification_outbox_updated_at before update on public.notification_outbox
   for each row execute procedure public.set_updated_at();
 
@@ -235,6 +238,7 @@ begin
   return new;
 end;
 $$;
+drop trigger if exists queue_order_email on public.orders;
 create trigger queue_order_email after insert or update of fulfillment_status on public.orders
   for each row execute procedure public.queue_order_email();
 
@@ -247,6 +251,7 @@ begin
   return new;
 end;
 $$;
+drop trigger if exists queue_support_email on public.support_requests;
 create trigger queue_support_email after insert on public.support_requests
   for each row execute procedure public.queue_support_email();
 

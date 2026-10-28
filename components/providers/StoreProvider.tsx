@@ -12,6 +12,14 @@ import { createClient } from "@/utils/supabase/client";
 const ProductPreviewModal = dynamic(() => import("@/components/products/ProductPreviewModal"));
 
 type AccountRole = "shopper" | "seller" | "admin";
+type SocialProvider = "google" | "apple" | "facebook";
+type ProductInteraction = "view" | "favorite" | "unfavorite" | "add_to_cart";
+
+const socialProviders: Array<{ id: SocialProvider; label: string; enabled: boolean }> = [
+  { id: "google", label: "Google", enabled: process.env.NEXT_PUBLIC_ENABLE_GOOGLE_AUTH !== "false" },
+  { id: "apple", label: "Apple", enabled: process.env.NEXT_PUBLIC_ENABLE_APPLE_AUTH === "true" },
+  { id: "facebook", label: "Facebook", enabled: process.env.NEXT_PUBLIC_ENABLE_FACEBOOK_AUTH === "true" },
+];
 
 type StoreUser = {
   id: string;
@@ -69,6 +77,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [cartOpen, setCartOpen] = useState(false);
   const [wishlistOpen, setWishlistOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authError, setAuthError] = useState("");
   const [currentUser, setCurrentUser] = useState<StoreUser | null>(null);
   const [notice, setNotice] = useState("");
   const userName = currentUser?.name ?? null;
@@ -92,16 +101,53 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const oauthError = url.searchParams.get("authError");
+    if (!oauthError) return;
+    url.searchParams.delete("authError");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    const timer = window.setTimeout(() => {
+      setAuthError(oauthError === "provider_cancelled"
+        ? "Social sign-in was cancelled. You can try again or use email and password."
+        : oauthError === "account_archived"
+          ? "This account is archived. Contact BelGlow support or ask an administrator to restore it."
+          : oauthError === "account_suspended"
+            ? "This account is currently suspended. Contact BelGlow support if you need assistance."
+            : "We could not complete social sign-in. Please try again or use email and password.");
+      setAuthOpen(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     const supabase = createClient();
     let active = true;
 
     async function loadProfile(userId: string, email: string, metadata: Record<string, unknown>) {
-      const [{ data }, { data: hasAdminAccess }] = await Promise.all([
-        supabase.from("profiles").select("role, full_name").eq("id", userId).maybeSingle(),
+      const [profileResult, adminResult] = await Promise.all([
+        supabase.from("profiles").select("role, full_name, account_status, suspended_until").eq("id", userId).maybeSingle(),
         supabase.rpc("is_admin"),
       ]);
+      let data = profileResult.data as { role: string; full_name: string | null; account_status?: string; suspended_until?: string | null } | null;
+      if (profileResult.error?.message.includes("account_status") || profileResult.error?.message.includes("suspended_until")) {
+        const legacyResult = await supabase.from("profiles").select("role, full_name").eq("id", userId).maybeSingle();
+        data = legacyResult.data;
+      }
       if (!active) return;
-      const role = hasAdminAccess || data?.role === "admin" || data?.role === "staff" ? "admin" : data?.role === "seller" ? "seller" : "shopper";
+      const suspensionActive = data?.account_status === "suspended"
+        && (!data.suspended_until || new Date(data.suspended_until).getTime() > Date.now());
+      if (data?.account_status === "archived" || suspensionActive) {
+        await supabase.auth.signOut({ scope: "local" });
+        if (!active) return;
+        setCurrentUser(null);
+        clearPrivateShoppingState();
+        setAuthError(data?.account_status === "archived"
+          ? "This account is archived. Contact BelGlow support or ask an administrator to restore it."
+          : "This account is currently suspended. Contact BelGlow support if you need assistance.");
+        setAuthOpen(true);
+        return;
+      }
+      const role = adminResult.data || data?.role === "admin" || data?.role === "staff" ? "admin" : data?.role === "seller" ? "seller" : "shopper";
       const metadataName = typeof metadata.full_name === "string" ? metadata.full_name : typeof metadata.name === "string" ? metadata.name : "";
       setCurrentUser({ id: userId, name: data?.full_name || metadataName || email.split("@")[0], email, role });
     }
@@ -327,6 +373,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => { active = false; };
   }, [currentUser, shouldLoadShoppingData]);
 
+  useEffect(() => {
+    if (!currentUser || !shouldLoadShoppingData) {
+      const resetTimer = window.setTimeout(() => setInterest({}), 0);
+      return () => window.clearTimeout(resetTimer);
+    }
+    let active = true;
+    createClient()
+      .from("product_interactions")
+      .select("product_id, weight")
+      .eq("user_id", currentUser.id)
+      .not("product_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(500)
+      .then(({ data }) => {
+        if (!active) return;
+        const persistedInterest: Record<string, number> = {};
+        for (const interaction of data ?? []) {
+          if (!interaction.product_id) continue;
+          persistedInterest[interaction.product_id] = (persistedInterest[interaction.product_id] ?? 0) + Number(interaction.weight);
+        }
+        setInterest(persistedInterest);
+      });
+    return () => { active = false; };
+  }, [currentUser, shouldLoadShoppingData]);
+
   // Lock page scrolling while a modal or framed panel owns the interaction focus.
   useEffect(() => {
     if (!blockingOverlay) return;
@@ -355,8 +426,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     window.setTimeout(() => setNotice(""), 2200);
   }
 
+  function recordProductInteraction(id: string, interaction: ProductInteraction, weight: number) {
+    setInterest((current) => ({ ...current, [id]: Math.max(0, (current[id] ?? 0) + weight) }));
+    if (!currentUser || !isDatabaseId(id)) return;
+    void createClient().from("product_interactions").insert({
+      user_id: currentUser.id,
+      product_id: id,
+      interaction,
+      weight,
+      metadata: { source: pathname },
+    });
+  }
+
   function trackProduct(id: string) {
-    setInterest((current) => ({ ...current, [id]: (current[id] ?? 0) + 1 }));
+    recordProductInteraction(id, "view", 1);
   }
 
   function openProduct(id: string) {
@@ -373,7 +456,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (shouldSave) showNotice("Saved for this visit. Sign in to keep it for later.");
     }
     else if (isDatabaseId(id)) void persistWishlistChange(id, shouldSave);
-    trackProduct(id);
+    recordProductInteraction(id, shouldSave ? "favorite" : "unfavorite", shouldSave ? 4 : -4);
   }
 
   function toggleSavedStore(id: string) {
@@ -425,7 +508,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (error) showNotice(error.message);
       });
     }
-    trackProduct(id);
+    recordProductInteraction(id, "add_to_cart", 3);
     showNotice("Added to your glow bag");
   }
 
@@ -471,7 +554,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     openProduct, trackProduct,
     openCart: () => { if (!shouldLoadShoppingData) router.push("/shop"); setWishlistOpen(false); setCartOpen(true); },
     openWishlist: () => { if (!shouldLoadShoppingData) router.push("/shop"); setCartOpen(false); setWishlistOpen(true); },
-    openAuth: () => setAuthOpen(true),
+    openAuth: () => { setAuthError(""); setAuthOpen(true); },
     completeCheckout,
     signOut,
   };
@@ -481,7 +564,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     {selectedProductId !== null && catalogProducts.find((product) => product.id === selectedProductId) && <ProductPreviewModal product={catalogProducts.find((product) => product.id === selectedProductId)!} onClose={() => setSelectedProductId(null)} onAdd={addToCart} onFavorite={toggleFavorite} favorite={favoriteIds.includes(selectedProductId)} />}
     {cartOpen && <CartDrawer cart={cart} products={catalogProducts} isGuest={!currentUser} onClose={() => setCartOpen(false)} onRemove={removeFromCart} />}
     {wishlistOpen && <SavedProductsPanel favoriteIds={favoriteIds} products={catalogProducts} onClose={() => setWishlistOpen(false)} onRemove={toggleFavorite} onOpen={(id) => { setWishlistOpen(false); openProduct(id); }} />}
-    {authOpen && <AuthModal onClose={() => setAuthOpen(false)} onSuccess={completeAuth} />}
+    {authOpen && <AuthModal initialError={authError} onClose={() => setAuthOpen(false)} onSuccess={completeAuth} />}
     {notice && <div role="status" className="toast-in fixed bottom-6 left-1/2 z-[100] -translate-x-1/2 rounded-full bg-[#241a1e] px-5 py-3 text-sm font-semibold text-white shadow-xl">{notice}</div>}
   </StoreContext.Provider>;
 }
@@ -525,12 +608,31 @@ function EmptyPanel({ icon, title, text }: { icon: ReactNode; title: string; tex
   return <div className="grid min-h-52 place-items-center rounded-2xl bg-[#fff6f8] p-7 text-center text-[#74696d]"><div><span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-white text-[#ed4773]">{icon}</span><p className="mt-4 font-bold text-[#35292e]">{title}</p><p className="mt-1 text-sm">{text}</p></div></div>;
 }
 
-function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (destination: string) => void }) {
+function AuthModal({ initialError, onClose, onSuccess }: { initialError: string; onClose: () => void; onSuccess: (destination: string) => void }) {
   const [mode, setMode] = useState<"signup" | "signin" | "recovery">("signin");
   const [role, setRole] = useState<Exclude<AccountRole, "admin">>("shopper");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const [sent, setSent] = useState(false);
+  const [availableProviders, setAvailableProviders] = useState<typeof socialProviders>([]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadProviders() {
+      try {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/settings`, {
+          headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY! },
+        });
+        if (!response.ok) return;
+        const settings = await response.json() as { external?: Partial<Record<SocialProvider, boolean>> };
+        if (active) setAvailableProviders(socialProviders.filter((provider) => provider.enabled && settings.external?.[provider.id] === true));
+      } catch {
+        // Email/password remains available when provider discovery is offline.
+      }
+    }
+    void loadProviders();
+    return () => { active = false; };
+  }, []);
 
   function destination() {
     return mode === "signup" && role === "seller" ? "/seller-application" : "/account";
@@ -573,12 +675,12 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (de
     }
   }
 
-  async function signInWithGoogle() {
+  async function signInWithProvider(provider: SocialProvider) {
     setBusy(true);
     setError("");
     const { error: authError } = await createClient().auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/account")}` },
+      provider,
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination())}` },
     });
     if (authError) {
       setError(authError.message);
@@ -607,10 +709,11 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (de
       <h2 className="mt-5 text-3xl font-black tracking-[-.04em]">{mode === "signup" ? "Join BelGlow" : mode === "recovery" ? "Reset your password" : "Welcome back"}</h2>
       <p className="mt-2 text-sm leading-6 text-[#75696e]">Shop beautiful essentials or grow your own beauty business in the BelGlow marketplace.</p>
       {sent ? <div className="mt-7 rounded-2xl bg-[#effbf4] p-5 text-sm leading-6 text-[#23643c]" role="status">Check your email for the next step. If you already have an account, you can sign in instead.</div> : <>
-        <div className="my-5 flex items-center gap-3 text-xs text-[#9a8f93]"><span className="h-px flex-1 bg-[#eadfe2]" />or continue with<span className="h-px flex-1 bg-[#eadfe2]" /></div>
-        <button type="button" disabled={busy} onClick={signInWithGoogle} className="flex w-full items-center justify-center gap-3 rounded-full border border-[#ddd2d6] py-3.5 font-bold transition hover:bg-[#fff8fa] disabled:opacity-50"><span className="text-lg font-black text-[#4285f4]">G</span> Continue with Google</button>
+        {mode === "signup" && <div className="mt-5 grid grid-cols-2 gap-2 rounded-2xl bg-[#fff5f7] p-1.5" aria-label="Choose account type"><button type="button" onClick={() => setRole("shopper")} aria-pressed={role === "shopper"} className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${role === "shopper" ? "bg-white text-[#df3765] shadow-sm" : "text-[#776a6f]"}`}><UserRound size={16} /> I want to shop</button><button type="button" onClick={() => setRole("seller")} aria-pressed={role === "seller"} className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${role === "seller" ? "bg-white text-[#df3765] shadow-sm" : "text-[#776a6f]"}`}><Store size={16} /> I want to sell</button></div>}
+        {mode !== "recovery" && availableProviders.length > 0 && <div className="mt-5 space-y-2">{availableProviders.map((provider) => <button key={provider.id} type="button" disabled={busy} onClick={() => void signInWithProvider(provider.id)} className="flex w-full items-center justify-center gap-3 rounded-full border border-[#ddd2d6] py-3.5 font-bold transition hover:bg-[#fff8fa] disabled:opacity-50"><SocialProviderIcon provider={provider.id} /> Continue with {provider.label}</button>)}</div>}
+        {mode !== "recovery" && availableProviders.length > 0 && <div className="my-5 flex items-center gap-3 text-xs text-[#9a8f93]"><span className="h-px flex-1 bg-[#eadfe2]" />or use email<span className="h-px flex-1 bg-[#eadfe2]" /></div>}
         <form onSubmit={mode === "recovery" ? sendRecoveryEmail : submitEmail} className="mt-4 space-y-3">
-          {mode === "signup" && <><div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#fff5f7] p-1.5" aria-label="Choose account type"><button type="button" onClick={() => setRole("shopper")} aria-pressed={role === "shopper"} className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${role === "shopper" ? "bg-white text-[#df3765] shadow-sm" : "text-[#776a6f]"}`}><UserRound size={16} /> I want to shop</button><button type="button" onClick={() => setRole("seller")} aria-pressed={role === "seller"} className={`flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-bold ${role === "seller" ? "bg-white text-[#df3765] shadow-sm" : "text-[#776a6f]"}`}><Store size={16} /> I want to sell</button></div><label className="block text-xs font-bold text-[#5f5358]">Full name<input name="name" required placeholder="Your name or business" className="mt-1.5 h-12 w-full rounded-xl border border-[#e7dade] px-4 font-normal outline-none focus:border-[#ef4b74]" /></label></>}
+          {mode === "signup" && <label className="block text-xs font-bold text-[#5f5358]">Full name<input name="name" required placeholder="Your name or business" className="mt-1.5 h-12 w-full rounded-xl border border-[#e7dade] px-4 font-normal outline-none focus:border-[#ef4b74]" /></label>}
           <label className="block text-xs font-bold text-[#5f5358]">Email address<div className="relative mt-1.5"><Mail className="absolute left-4 top-3.5 text-[#a79ba0]" size={18} /><input name="email" type="email" required placeholder="you@example.com" className="h-12 w-full rounded-xl border border-[#e7dade] pl-11 pr-4 font-normal outline-none focus:border-[#ef4b74]" /></div></label>
           {mode !== "recovery" && <label className="block text-xs font-bold text-[#5f5358]">Password<input name="password" type="password" required minLength={8} autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="At least 8 characters" className="mt-1.5 h-12 w-full rounded-xl border border-[#e7dade] px-4 font-normal outline-none focus:border-[#ef4b74]" /></label>}
           {error && <p role="alert" className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
@@ -621,6 +724,12 @@ function AuthModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (de
       </>}
     </div>
   </ModalShell>;
+}
+
+function SocialProviderIcon({ provider }: { provider: SocialProvider }) {
+  if (provider === "google") return <svg aria-hidden viewBox="0 0 24 24" className="h-5 w-5"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.06H12v3.9h5.38a4.6 4.6 0 0 1-2 3.02v2.53h3.24c1.9-1.75 2.98-4.33 2.98-7.39Z"/><path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.63-2.38l-3.24-2.53c-.9.6-2.05.96-3.39.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.61A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.39 13.92A6.01 6.01 0 0 1 6.07 12c0-.67.12-1.32.32-1.92V7.47H3.04A10 10 0 0 0 2 12c0 1.61.39 3.14 1.04 4.53l3.35-2.61Z"/><path fill="#EA4335" d="M12 5.95c1.47 0 2.79.5 3.83 1.5l2.87-2.87A9.62 9.62 0 0 0 12 2a10 10 0 0 0-8.96 5.47l3.35 2.61C7.18 7.71 9.39 5.95 12 5.95Z"/></svg>;
+  if (provider === "apple") return <svg aria-hidden viewBox="0 0 24 24" className="h-5 w-5 fill-current"><path d="M16.7 12.9c0-2.4 2-3.6 2.1-3.7a4.5 4.5 0 0 0-3.5-1.9c-1.5-.2-2.9.9-3.7.9-.8 0-2-.9-3.3-.9a4.9 4.9 0 0 0-4.1 2.5c-1.8 3-.5 7.6 1.2 10.1.9 1.2 1.9 2.6 3.2 2.5 1.3-.1 1.8-.8 3.4-.8 1.5 0 2 .8 3.4.8s2.3-1.2 3.1-2.5a11 11 0 0 0 1.4-2.8 4.2 4.2 0 0 1-3.2-4.2ZM14.3 5.8A4.4 4.4 0 0 0 15.4 2a4.5 4.5 0 0 0-3 1.5 4.1 4.1 0 0 0-1.1 3.7 3.7 3.7 0 0 0 3-1.4Z"/></svg>;
+  return <span aria-hidden className="grid h-5 w-5 place-items-center rounded-full bg-[#1877f2] text-sm font-black text-white">f</span>;
 }
 
 function ModalShell({ children, label, onClose, wide = false }: { children: ReactNode; label: string; onClose: () => void; wide?: boolean }) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { Download, Share2, X } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 type InstallPromptEvent = Event & {
@@ -8,10 +9,10 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
 
-const DISMISSED_KEY = "belglow-pwa-install-dismissed";
-const DISMISS_FOR_MS = 30 * 24 * 60 * 60 * 1000;
+const PROMPT_SHOWN_KEY = "belglow-pwa-install-prompt-shown";
 
 export default function PwaManager() {
+  const pathname = usePathname();
   const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -21,44 +22,56 @@ export default function PwaManager() {
       void navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() => undefined);
     }
 
-    const standalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-    const dismissedAt = Number(window.localStorage.getItem(DISMISSED_KEY));
-    if (standalone || (dismissedAt > 0 && Date.now() - dismissedAt < DISMISS_FOR_MS)) return;
-
-    const appleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    if (appleMobile) {
-      const timer = window.setTimeout(() => {
-        setIsIOS(true);
-        setVisible(true);
-      }, 2500);
-      return () => window.clearTimeout(timer);
-    }
-
     function captureInstall(event: Event) {
       event.preventDefault();
       setInstallEvent(event as InstallPromptEvent);
-      setVisible(true);
     }
 
     window.addEventListener("beforeinstallprompt", captureInstall);
     return () => window.removeEventListener("beforeinstallprompt", captureInstall);
   }, []);
 
+  useEffect(() => {
+    if (pathname !== "/" || window.localStorage.getItem(PROMPT_SHOWN_KEY)) return;
+
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    if (standalone) return;
+
+    const appleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (!appleMobile && !installEvent) return;
+
+    const timer = window.setTimeout(() => {
+      if (window.localStorage.getItem(PROMPT_SHOWN_KEY)) return;
+      window.localStorage.setItem(PROMPT_SHOWN_KEY, "true");
+      setIsIOS(appleMobile);
+      setVisible(true);
+    }, appleMobile ? 2500 : 0);
+
+    return () => window.clearTimeout(timer);
+  }, [installEvent, pathname]);
+
+  useEffect(() => {
+    function hidePromptShownInAnotherTab(event: StorageEvent) {
+      if (event.key === PROMPT_SHOWN_KEY && event.newValue) setVisible(false);
+    }
+
+    window.addEventListener("storage", hidePromptShownInAnotherTab);
+    return () => window.removeEventListener("storage", hidePromptShownInAnotherTab);
+  }, []);
+
   function dismiss() {
-    window.localStorage.setItem(DISMISSED_KEY, String(Date.now()));
     setVisible(false);
   }
 
   async function install() {
     if (!installEvent) return;
     await installEvent.prompt();
-    const choice = await installEvent.userChoice;
+    await installEvent.userChoice;
     setVisible(false);
-    if (choice.outcome === "dismissed") window.localStorage.setItem(DISMISSED_KEY, String(Date.now()));
     setInstallEvent(null);
   }
 
-  if (!visible) return null;
+  if (!visible || pathname !== "/") return null;
 
   return <aside aria-label="Install BelGlow" className="pwa-install fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] z-[70] w-[calc(100vw-2rem)] max-w-sm rounded-2xl border border-[#efd7de] bg-white/95 p-4 shadow-[0_18px_55px_rgba(73,29,43,.22)] backdrop-blur sm:w-auto">
     <button onClick={dismiss} aria-label="Dismiss install message" className="absolute right-2 top-2 grid min-h-10 min-w-10 place-items-center rounded-full text-[#75696e] hover:bg-[#fff1f5]"><X size={17} /></button>

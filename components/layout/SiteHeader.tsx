@@ -42,9 +42,7 @@ export default function SiteHeader({
       openAuth();
       return;
     }
-    // Keep account routing centralized so a refreshed role or seller approval
-    // is honored instead of relying on possibly stale client-side profile data.
-    router.push("/account");
+    router.push(userRole === "admin" ? "/admin" : userRole === "seller" ? "/dashboard" : "/account");
   }
 
   const accountLabel = userRole === "admin" ? "Admin dashboard" : userRole === "seller" ? "Seller dashboard" : userName ? "My account" : "Sign in or create account";

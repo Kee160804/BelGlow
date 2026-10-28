@@ -38,7 +38,7 @@ This directory contains a migration-ready PostgreSQL design for the BelGlow mult
 - `migrations/20261003000000_marketplace_workflows.sql` adds server-validated seller product creation, marketplace reviews, commission settings, and cart RPCs.
 - `migrations/20261005000000_admin_official_store_mode.sql` provisions the official BelGlow seller store for an admin without requiring an application.
 - `migrations/20261006000000_independent_platform_admins.sql` stores admin privileges independently from seller/customer roles and enables secure admin-account management.
-- `seed.sql` adds all current BelGlow departments, subcategories, storefront products, default variants, starter inventory, and shipping methods.
+- `seed.sql` adds BelGlow departments, subcategories, the default inventory location, and shipping methods. Products and inventory are created by approved sellers only.
 
 ## Marketplace transaction flow
 

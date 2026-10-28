@@ -30,7 +30,7 @@ const navigation = [
   { label: "Reviews", href: "/dashboard/reviews", icon: Star },
   { label: "Promotions", href: "/dashboard/promotions", icon: BadgePercent },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-  { label: "Payouts", href: "/dashboard/payouts", icon: WalletCards },
+  { label: "Commission", href: "/dashboard/payouts", icon: WalletCards },
   { label: "Store profile", href: "/dashboard/store-profile", icon: Store },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ] as const;
@@ -133,7 +133,7 @@ export default function SellerDashboard({ accountRole, initialUserName }: { acco
         </nav>
         <div className="mt-auto rounded-2xl border border-[#eadbd6] bg-white/70 p-4">
           <p className="text-sm font-bold">{userRole === "admin" ? "BelGlow Official Store" : "Seller storefront"}</p>
-          <p className="mt-1 text-xs leading-5 text-[#75696b]">{userRole === "admin" ? "Manage and sell BelGlow-owned products from your official store." : "A 15% platform fee is deducted from each completed sale."}</p>
+          <p className="mt-1 text-xs leading-5 text-[#75696b]">{userRole === "admin" ? "Manage and sell BelGlow-owned products from your official store." : "Customers pay you directly; a 10% commission is owed to BelGlow on each confirmed sale."}</p>
           <button onClick={signOut} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-[#d8aaa3] py-2 text-xs font-bold text-[#a95b58]"><LogOut size={15} /> Sign out</button>
         </div>
       </aside>
@@ -176,7 +176,7 @@ const sectionCopy: Record<string, { eyebrow: string; title: string; description:
   reviews: { eyebrow: "Reputation", title: "Reviews", description: "Read feedback and respond to your customers thoughtfully." },
   promotions: { eyebrow: "Marketing", title: "Promotions", description: "Create offers that help new customers discover your products." },
   analytics: { eyebrow: "Performance", title: "Analytics", description: "See where your sales come from and what is driving growth." },
-  payouts: { eyebrow: "Finances", title: "Payouts", description: "Review seller earnings, BelGlow commission, and transfer history." },
+  payouts: { eyebrow: "Finances", title: "Commission", description: "Review the 10% BelGlow commission recorded from your confirmed direct sales." },
   "store-profile": { eyebrow: "Storefront", title: "Store profile", description: "Keep your public business details and brand story up to date." },
   settings: { eyebrow: "Account", title: "Settings", description: "Control notifications, fulfillment preferences, and account security." },
 };
@@ -219,7 +219,6 @@ function PromotionsPage() { return <div className="grid gap-4 lg:grid-cols-3"><P
 
 function AnalyticsPage() { return <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MiniStat label="Store visits" value="2,840" /><MiniStat label="Conversion rate" value="4.4%" /><MiniStat label="Average order" value="BZ$33.97" /><MiniStat label="Repeat purchases" value="42%" /></div><Panel><div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">Revenue trend</h2><p className="text-sm text-[#7b7072]">Net earnings after BelGlow commission</p></div><span className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">+14.2%</span></div><div className="mt-6 h-72"><svg viewBox="0 0 720 250" className="h-full w-full" role="img" aria-label="Revenue increased throughout September">{[30,80,130,180,230].map((y) => <line key={y} x1="20" y1={y} x2="700" y2={y} stroke="#eee5e1" />)}<path d="M20 215 C100 195 100 165 180 175 S270 100 350 130 S450 65 520 92 S620 65 700 25" fill="none" stroke="#bd675f" strokeWidth="4" strokeLinecap="round" /></svg></div></Panel></div>; }
 
-function PayoutsPage() { return <div className="grid gap-5 xl:grid-cols-[.7fr_1.3fr]"><Panel><p className="text-sm text-[#756a6d]">Available balance</p><p className="mt-2 font-serif text-4xl font-bold">BZ$1,245.00</p><p className="mt-3 text-xs text-[#756a6d]">Next automatic payout: October 5</p><button className="mt-6 w-full rounded-xl bg-[#bf6d68] py-3 font-bold text-white">Request payout</button><div className="mt-6 border-t border-[#eee5e1] pt-5"><p className="flex justify-between text-sm"><span>Gross sales</span><strong>BZ$4,280.00</strong></p><p className="mt-3 flex justify-between text-sm"><span>BelGlow commission (15%)</span><strong className="text-[#a45a56]">− BZ$642.00</strong></p><p className="mt-3 flex justify-between text-sm"><span>Seller earnings</span><strong>BZ$3,638.00</strong></p></div></Panel><Panel><h2 className="text-lg font-bold">Payout history</h2><div className="mt-4 divide-y divide-[#eee5e1]">{[["Sep 20, 2026", "Bank transfer", "BZ$980.40", "Paid"], ["Sep 5, 2026", "Bank transfer", "BZ$1,120.25", "Paid"], ["Aug 20, 2026", "Bank transfer", "BZ$875.10", "Paid"]].map((payout) => <div key={payout[0]} className="grid grid-cols-[1fr_auto] gap-3 py-4"><div><p className="font-semibold">{payout[0]}</p><p className="text-xs text-[#817679]">{payout[1]} · {payout[3]}</p></div><strong>{payout[2]}</strong></div>)}</div></Panel></div>; }
 
 function StoreProfilePage() { return <form onSubmit={(event) => event.preventDefault()} className="grid gap-5 xl:grid-cols-[280px_1fr]"><Panel><div className="mx-auto grid h-28 w-28 place-items-center rounded-full bg-[#ead1cb] text-[#a95c59]"><Store size={44} /></div><button type="button" className="mt-5 w-full rounded-xl border border-[#d9c2bd] py-2.5 text-sm font-bold text-[#9b5a57]">Change logo</button><p className="mt-3 text-center text-xs text-[#817679]">Visible throughout the marketplace</p></Panel><Panel><h2 className="text-lg font-bold">Public store details</h2><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Store name" placeholder="Glow Essentials" /><Field label="Contact email" placeholder="hello@glowessentials.bz" /><Field label="Location" placeholder="Belize City, Belize" wide /><label className="sm:col-span-2 text-sm font-semibold">Brand story<textarea rows={6} defaultValue="Thoughtful beauty and self-care essentials made to help every customer feel radiant." className="mt-2 w-full rounded-xl border border-[#ddd3d0] bg-[#fcfaf9] p-4 font-normal outline-none focus:border-[#bf6d68]" /></label></div><button className="mt-5 rounded-xl bg-[#bf6d68] px-6 py-3 font-bold text-white">Save profile</button></Panel></form>; }
 

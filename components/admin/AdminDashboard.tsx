@@ -77,7 +77,7 @@ export default function AdminDashboard({ initialUserName }: { initialUserName: s
   const [accountOpen, setAccountOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<AdminModal>(null);
-  const [commissionRate, setCommissionRate] = useState(15);
+  const [commissionRate, setCommissionRate] = useState(10);
   const [pendingApprovals, setPendingApprovals] = useState<ReadonlyArray<ReadonlyArray<string>>>([]);
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
   const [payoutRows, setPayoutRows] = useState<ReadonlyArray<ReadonlyArray<string>>>(payouts);

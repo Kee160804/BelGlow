@@ -4,6 +4,7 @@ import { StoreProvider } from "@/components/providers/StoreProvider";
 import BackToTop from "@/components/layout/BackToTop";
 import SiteFooter from "@/components/layout/SiteFooter";
 import PwaManager from "@/components/pwa/PwaManager";
+import SessionTimeout from "@/components/auth/SessionTimeout";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -46,7 +47,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       data-scroll-behavior="smooth"
       className={`${dmSans.variable} ${playfair.variable}`}
     >
-      <body><StoreProvider>{children}<SiteFooter /><PwaManager /><BackToTop /></StoreProvider></body>
+      <body><StoreProvider>{children}<SiteFooter /><PwaManager /><SessionTimeout /><BackToTop /></StoreProvider></body>
     </html>
   );
 }

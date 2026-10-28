@@ -6,6 +6,10 @@ const supabaseHostname = process.env.NEXT_PUBLIC_SUPABASE_URL
 
 const nextConfig: NextConfig = {
   images: {
+    // The large shared product artwork is reused in several crops. Avoid
+    // repeatedly transforming it during local development; production builds
+    // keep Next's AVIF/WebP optimization enabled.
+    unoptimized: process.env.NODE_ENV === "development",
     remotePatterns: supabaseHostname ? [{ protocol: "https", hostname: supabaseHostname, pathname: "/storage/v1/object/public/**" }] : [],
     formats: ["image/avif", "image/webp"],
   },

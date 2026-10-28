@@ -301,7 +301,7 @@ set search_path = ''
 as $$
 declare
   actor_id uuid := auth.uid();
-  order_id uuid;
+  created_order_uuid uuid;
   order_no bigint;
   payment_id uuid;
   existing_order public.orders%rowtype;
@@ -388,10 +388,10 @@ begin
     shipping_address, customer_note, checkout_token
   ) values (
     actor_id, lower(trim(checkout_email)), nullif(left(trim(coalesce(checkout_phone, '')), 40), ''),
-    case when lower(coalesce(checkout_provider, 'manual')) in ('manual', 'cash_on_delivery') then 'confirmed' else 'pending' end,
+    case when lower(coalesce(checkout_provider, 'manual')) in ('manual', 'cash_on_delivery') then 'confirmed'::public.order_status else 'pending'::public.order_status end,
     'pending', 'unfulfilled', 'BZD', subtotal, discount_total, shipping_row.price_cents, total, shipping_row.name,
     checkout_shipping_address, nullif(left(trim(coalesce(checkout_note, '')), 2000), ''), checkout_idempotency_key
-  ) returning id, order_number into order_id, order_no;
+  ) returning id, order_number into created_order_uuid, order_no;
 
   for item in select value from jsonb_array_elements(checkout_items)
   loop
@@ -413,23 +413,23 @@ begin
       order_id, product_id, variant_id, sku, product_name, variant_name,
       quantity, unit_price_cents, product_snapshot
     ) values (
-      order_id, variant_row.product_id, variant_row.id, variant_row.sku,
+      created_order_uuid, variant_row.product_id, variant_row.id, variant_row.sku,
       variant_row.product_name, variant_row.variant_name, requested_quantity,
       variant_row.price_cents, jsonb_build_object('attributes', variant_row.attributes)
     );
   end loop;
 
-  perform public.finalize_seller_order_splits(order_id);
+  perform public.finalize_seller_order_splits(created_order_uuid);
   if promotion_row.id is not null then
     insert into public.promotion_redemptions(promotion_id, user_id, order_id, discount_cents)
-    values (promotion_row.id, actor_id, order_id, discount_total);
+    values (promotion_row.id, actor_id, created_order_uuid, discount_total);
     update public.promotions set usage_count = usage_count + 1, updated_at = now() where id = promotion_row.id;
   end if;
   insert into public.payments (order_id, provider, status, amount_cents, currency)
-  values (order_id, left(coalesce(nullif(trim(checkout_provider), ''), 'manual'), 60), 'pending', total, 'BZD')
+  values (created_order_uuid, left(coalesce(nullif(trim(checkout_provider), ''), 'manual'), 60), 'pending', total, 'BZD')
   returning id into payment_id;
   insert into public.order_status_history(order_id, status, note, changed_by)
-  values (order_id, case when lower(coalesce(checkout_provider, 'manual')) in ('manual', 'cash_on_delivery') then 'confirmed' else 'pending' end,
+  values (created_order_uuid, case when lower(coalesce(checkout_provider, 'manual')) in ('manual', 'cash_on_delivery') then 'confirmed'::public.order_status else 'pending'::public.order_status end,
           'Order created at checkout', actor_id);
 
   if actor_id is not null then
@@ -441,8 +441,8 @@ begin
   insert into public.notifications(user_id, kind, title, body, href)
   select store.owner_id, 'seller_order', 'New order', 'A new order is ready in your seller dashboard.', '/dashboard/orders'
   from public.seller_orders seller_order join public.seller_stores store on store.id = seller_order.seller_store_id
-  where seller_order.order_id = order_id;
-  return query select order_id, order_no, total, payment_id;
+  where seller_order.order_id = created_order_uuid;
+  return query select created_order_uuid, order_no, total, payment_id;
 end;
 $$;
 

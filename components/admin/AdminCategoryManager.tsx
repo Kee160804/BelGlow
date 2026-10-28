@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Edit3, FolderTree, Plus, Save, X } from "lucide-react";
+import { Check, ChevronDown, Edit3, FolderTree, Plus, Save, Trash2, X } from "lucide-react";
 import type { MarketplaceCategory } from "@/lib/marketplace-categories";
 import { categoryChildren, rootCategories } from "@/lib/marketplace-categories";
 import { createClient } from "@/utils/supabase/client";
@@ -72,6 +72,49 @@ export default function AdminCategoryManager() {
     else { setNotice(category.is_active ? "Category hidden from sellers and shoppers." : "Category restored for sellers and shoppers."); await load(); }
   }
 
+  async function remove(category: MarketplaceCategory) {
+    const children = categoryChildren(categories, category.id);
+    const categoryIds = [category.id, ...children.map((child) => child.id)];
+    const scopeLabel = children.length > 0
+      ? `${category.name} and its ${children.length} subcategories`
+      : category.name;
+    if (!window.confirm(`Permanently delete ${scopeLabel}? You cannot undo this action.`)) return;
+
+    setBusy(category.id); setError(""); setNotice("");
+    const supabase = createClient();
+    const { count, error: assignmentError } = await supabase.from("product_categories")
+      .select("product_id", { count: "exact", head: true })
+      .in("category_id", categoryIds);
+    if (assignmentError) {
+      setBusy("");
+      setError(assignmentError.message);
+      return;
+    }
+    if ((count ?? 0) > 0) {
+      setBusy("");
+      setError(`Cannot delete ${scopeLabel} because ${(count ?? 0).toLocaleString()} product assignment${count === 1 ? "" : "s"} still use it. Reassign those products first, or hide the category instead.`);
+      return;
+    }
+
+    if (children.length > 0) {
+      const { error: childDeleteError } = await supabase.from("categories").delete().in("id", children.map((child) => child.id));
+      if (childDeleteError) {
+        setBusy("");
+        setError(childDeleteError.message);
+        return;
+      }
+    }
+    const { error: deleteError } = await supabase.from("categories").delete().eq("id", category.id);
+    setBusy("");
+    if (deleteError) setError(deleteError.message);
+    else {
+      setNotice(`${scopeLabel} permanently deleted. You can add it again at any time.`);
+      setEditingId(null);
+      setExpandedCategoryIds((current) => current.filter((id) => !categoryIds.includes(id)));
+      await load();
+    }
+  }
+
   function renderCategoryRow(category: MarketplaceCategory, nested = false, childCount = 0) {
     const editing = editingId === category.id;
     const expanded = expandedCategoryIds.includes(category.id);
@@ -81,6 +124,7 @@ export default function AdminCategoryManager() {
         <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className={`font-semibold ${nested ? "text-sm" : ""}`}>{category.name}</h3><span className={`rounded-full px-2 py-0.5 text-xs font-bold ${category.is_active ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-600"}`}>{category.is_active ? "Active" : "Hidden"}</span>{!nested && childCount > 0 && <span className="text-xs font-semibold text-[#8a777c]">{childCount} {childCount === 1 ? "subcategory" : "subcategories"}</span>}</div><p className="mt-1 text-xs text-[#817679]">Order {category.sort_order} · /{category.slug}</p></div>
         <button type="button" onClick={() => setEditingId(editing ? null : category.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#d9c2bd] px-3 py-2 text-xs font-bold text-[#9b5a57]">{editing ? <X size={15} /> : <Edit3 size={15} />}{editing ? "Close" : "Edit"}</button>
         <button type="button" disabled={busy === category.id} onClick={() => void toggle(category)} className="inline-flex items-center gap-1.5 rounded-lg bg-[#f6efed] px-3 py-2 text-xs font-bold text-[#9b5a57]">{category.is_active ? <X size={15} /> : <Check size={15} />}{category.is_active ? "Hide" : "Activate"}</button>
+        <button type="button" disabled={busy === category.id} onClick={() => void remove(category)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50"><Trash2 size={15} />Delete</button>
       </div>
       {editing && <form onSubmit={(event) => void save(event, category)} className={`border-t border-[#eee5e2] p-4 ${nested ? "bg-[#fffdfc]" : ""}`}><CategoryFields category={category} parents={childCount > 0 ? [] : parents.filter((item) => item.id !== category.id)} /><button disabled={busy === category.id} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#292326] px-5 py-3 text-sm font-bold text-white disabled:opacity-50"><Save size={17} />Save changes</button></form>}
     </>;
