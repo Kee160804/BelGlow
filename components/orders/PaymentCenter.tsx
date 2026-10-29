@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Building2, CheckCircle2, Clock3, Copy, LoaderCircle, UploadCloud, XCircle } from "lucide-react";
 
 export type PaymentSeller = {
@@ -25,14 +25,15 @@ export type PaymentOrder = {
   sellers: PaymentSeller[];
 };
 
-export default function PaymentCenter({ initialOrder = null, initialEmail = "", lookupOnly = false }: { initialOrder?: PaymentOrder | null; initialEmail?: string; lookupOnly?: boolean }) {
+export default function PaymentCenter({ initialOrder = null, initialEmail = "", initialOrderNumber, lookupOnly = false, onPaymentStatusChange }: { initialOrder?: PaymentOrder | null; initialEmail?: string; initialOrderNumber?: number; lookupOnly?: boolean; onPaymentStatusChange?: (status: PaymentSeller["paymentStatus"] | "mixed") => void }) {
   const [order, setOrder] = useState<PaymentOrder | null>(initialOrder);
   const [email, setEmail] = useState(initialEmail);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const autoLoaded = useRef(false);
 
-  async function lookup(event?: FormEvent<HTMLFormElement>, knownOrderNumber?: number) {
+  const lookup = useCallback(async (event?: FormEvent<HTMLFormElement>, knownOrderNumber?: number) => {
     event?.preventDefault();
     const form = event ? new FormData(event.currentTarget) : null;
     const orderNumber = knownOrderNumber ?? Number(form?.get("orderNumber"));
@@ -43,9 +44,18 @@ export default function PaymentCenter({ initialOrder = null, initialEmail = "", 
       const result = await response.json() as { error?: string; order?: PaymentOrder };
       if (!response.ok || !result.order) throw new Error(result.error || "Unable to load payment details.");
       setEmail(lookupEmail); setOrder(result.order);
+      const statuses = result.order.sellers.map((seller) => seller.paymentStatus);
+      const visibleStatus = statuses.includes("rejected") ? "rejected" : statuses.includes("under_review") ? "under_review" : statuses.includes("awaiting_payment") ? "awaiting_payment" : statuses.every((status) => status === "confirmed") ? "confirmed" : "mixed";
+      onPaymentStatusChange?.(visibleStatus);
     } catch (lookupError) { setError(lookupError instanceof Error ? lookupError.message : "Unable to load payment details."); }
     finally { setBusy(""); }
-  }
+  }, [email, onPaymentStatusChange]);
+
+  useEffect(() => {
+    if (initialOrder || !initialOrderNumber || autoLoaded.current) return;
+    autoLoaded.current = true;
+    void lookup(undefined, initialOrderNumber);
+  }, [initialOrder, initialOrderNumber, lookup]);
 
   async function upload(event: FormEvent<HTMLFormElement>, seller: PaymentSeller) {
     event.preventDefault();
@@ -63,9 +73,11 @@ export default function PaymentCenter({ initialOrder = null, initialEmail = "", 
     finally { setBusy(""); }
   }
 
+  if (!order && initialOrderNumber && busy === "lookup") return <section className="rounded-2xl border border-[#eadfdb] bg-white p-6 text-center"><LoaderCircle className="mx-auto animate-spin text-[#ef4b74]" size={24} /><p className="mt-3 text-sm font-bold">Loading payment instructions…</p></section>;
+
   if (!order || lookupOnly) return <section className="rounded-[24px] border border-[#eadfdb] bg-white p-6 shadow-sm sm:p-8">
     <h2 className="text-2xl font-black">Find your payment instructions</h2><p className="mt-2 text-sm text-[#75696b]">Use the order number and the same email entered at checkout.</p>
-    <form onSubmit={lookup} className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-sm font-bold">Order number<input name="orderNumber" inputMode="numeric" required className="mt-2 h-12 w-full rounded-xl border border-[#e7dade] px-4 font-normal" /></label><label className="text-sm font-bold">Checkout email<input name="email" type="email" required defaultValue={email} className="mt-2 h-12 w-full rounded-xl border border-[#e7dade] px-4 font-normal" /></label><button disabled={busy === "lookup"} className="flex items-center justify-center gap-2 rounded-full bg-[#ef4b74] py-3.5 font-bold text-white disabled:opacity-50 sm:col-span-2">{busy === "lookup" && <LoaderCircle size={18} className="animate-spin" />}Load payment details</button></form>
+    <form onSubmit={lookup} className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-sm font-bold">Order number<input name="orderNumber" inputMode="numeric" required defaultValue={initialOrderNumber} className="mt-2 h-12 w-full rounded-xl border border-[#e7dade] px-4 font-normal" /></label><label className="text-sm font-bold">Checkout email<input name="email" type="email" required defaultValue={email} className="mt-2 h-12 w-full rounded-xl border border-[#e7dade] px-4 font-normal" /></label><button disabled={busy === "lookup"} className="flex items-center justify-center gap-2 rounded-full bg-[#ef4b74] py-3.5 font-bold text-white disabled:opacity-50 sm:col-span-2">{busy === "lookup" && <LoaderCircle size={18} className="animate-spin" />}Load payment details</button></form>
     {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
     {order && <div className="mt-6"><PaymentCards order={order} busy={busy} onUpload={upload} /></div>}
   </section>;

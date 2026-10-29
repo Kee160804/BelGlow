@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Banknote, Check, CheckCircle2, Landmark, LoaderCircle, MapPin, Store, Truck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Banknote, Check, CheckCircle2, Landmark, LoaderCircle, MapPin, ShoppingBag, Sparkles, Store, Truck } from "lucide-react";
 import PaymentCenter, { type PaymentOrder } from "@/components/orders/PaymentCenter";
 import { useStore } from "@/components/providers/StoreProvider";
 import { createClient } from "@/utils/supabase/client";
@@ -123,7 +123,25 @@ export default function GuestCheckout() {
     }
   }
 
-  if (confirmation) return <section className="mt-5"><div className="rounded-[22px] border border-emerald-200 bg-emerald-50 p-6 text-center text-emerald-950"><CheckCircle2 className="mx-auto" size={38} /><h2 className="mt-3 text-2xl font-black">Order #{confirmation.orderNumber} was placed</h2><p className="mt-2 text-sm">{"BZ$" + (confirmation.totalCents / 100).toFixed(2)} · {paymentMethod === "bank_transfer" ? "Upload your receipt for seller verification." : paymentMethod === "pay_on_delivery" ? "Payment is due when your order is delivered." : "Payment is due when you collect your order."}</p></div>{confirmation.paymentDetails && <div className="mt-4"><PaymentCenter initialOrder={confirmation.paymentDetails} initialEmail={confirmation.email} /></div>}<div className="mt-4 flex justify-center gap-3"><Link href="/shop" className="rounded-full bg-[#ef4b74] px-5 py-2.5 text-sm font-bold text-white">Continue shopping</Link>{userName && <Link href="/account" className="rounded-full border border-emerald-300 bg-white px-5 py-2.5 text-sm font-bold">My orders</Link>}</div></section>;
+  if (confirmation) return <section className="mt-5">
+    <div className="relative overflow-hidden rounded-[24px] border border-[#f6ccd8] bg-[radial-gradient(circle_at_top_left,#fff_0,transparent_35%),linear-gradient(135deg,#fff8fa_0%,#ffe8ef_55%,#fff5f7_100%)] px-5 py-8 text-center shadow-[0_18px_50px_rgba(173,55,91,.12)] sm:px-10 sm:py-10">
+      <Sparkles aria-hidden="true" className="absolute left-[8%] top-7 text-[#ef4b74] opacity-70" size={22} />
+      <Sparkles aria-hidden="true" className="absolute right-[11%] top-12 text-[#d65bc2] opacity-60" size={16} />
+      <div className="relative mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#ef4b74] text-white shadow-[0_10px_25px_rgba(239,75,116,.28)]"><CheckCircle2 size={38} strokeWidth={2.5} /></div>
+      <h2 className="mt-4 text-2xl font-black text-[#292527]">Order Placed Successfully!</h2>
+      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[#75696b]">Your order has been placed successfully. {userName ? "Check the Orders section in your customer dashboard to view your order." : "Use your order number and email to track your order."}</p>
+      <div className="mx-auto mt-5 max-w-xl rounded-xl bg-white/70 px-5 py-3 ring-1 ring-[#f5d6df]">
+        <p className="text-[10px] font-bold uppercase tracking-[.16em] text-[#df3765]">Order reference number</p>
+        <p className="mt-1 text-xl font-black text-[#292527]">#{confirmation.orderNumber}</p>
+      </div>
+      <p className="mt-3 text-xs text-[#75696b]">Order details were sent to <strong className="text-[#292527]">{confirmation.email}</strong>.</p>
+      <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+        {userName && <Link href={`/account?order=${confirmation.orderNumber}`} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#ef4b74] px-6 py-3 text-sm font-bold text-white shadow-sm"><ShoppingBag size={17} />View order details</Link>}
+        <Link href="/shop" className="inline-flex items-center justify-center rounded-xl border border-[#ef4b74] bg-white px-6 py-3 text-sm font-bold text-[#df3765]">Continue shopping</Link>
+      </div>
+    </div>
+    {confirmation.paymentDetails && <div className="mt-4"><PaymentCenter initialOrder={confirmation.paymentDetails} initialEmail={confirmation.email} /></div>}
+  </section>;
   if (!lines.length) return <section className="mt-6 rounded-2xl bg-[#fff5f7] p-6 text-center text-sm text-[#75696e]">Your bag is empty.<Link href="/shop" className="ml-2 font-bold text-[#df3765] underline">Browse products</Link></section>;
 
   return <form ref={formRef} onSubmit={placeOrder} className="mt-3 flex min-h-[500px] flex-col rounded-[22px] border border-[#f0dce2] bg-white p-4 shadow-[0_18px_55px_rgba(107,44,62,.10)] sm:p-5">

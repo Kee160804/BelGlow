@@ -18,6 +18,7 @@ import NotificationBell from "@/components/dashboard/NotificationBell";
 
 const SellerProductManager = dynamic(() => import("@/components/dashboard/SellerProductManager"));
 const SellerOperations = dynamic(() => import("@/components/dashboard/SellerOperations"));
+const SellerCommissionCenter = dynamic(() => import("@/components/dashboard/SellerCommissionCenter"));
 const SellerBusinessTools = dynamic(() => import("@/components/dashboard/SellerBusinessTools"));
 
 const navigation = [
@@ -176,7 +177,7 @@ const sectionCopy: Record<string, { eyebrow: string; title: string; description:
   reviews: { eyebrow: "Reputation", title: "Reviews", description: "Read feedback and respond to your customers thoughtfully." },
   promotions: { eyebrow: "Marketing", title: "Promotions", description: "Create offers that help new customers discover your products." },
   analytics: { eyebrow: "Performance", title: "Analytics", description: "See where your sales come from and what is driving growth." },
-  payouts: { eyebrow: "Finances", title: "Commission", description: "Review the 10% BelGlow commission recorded from your confirmed direct sales." },
+  payouts: { eyebrow: "Finances", title: "Commission", description: "Track your BelGlow commission, monthly invoices, included sales, and payments." },
   "store-profile": { eyebrow: "Storefront", title: "Store profile", description: "Keep your public business details and brand story up to date." },
   settings: { eyebrow: "Account", title: "Settings", description: "Control notifications, fulfillment preferences, and account security." },
 };
@@ -186,7 +187,7 @@ function SectionWorkspace({ section }: { section: string }) {
   return <div className="p-4 sm:p-7 lg:p-8">
     <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
       <div><p className="text-xs font-bold uppercase tracking-[.2em] text-[#b35f5b]">{copy.eyebrow}</p><h1 className="mt-2 font-serif text-4xl font-semibold tracking-[-.025em]">{copy.title}</h1><p className="mt-2 max-w-2xl text-sm text-[#716669]">{copy.description}</p></div>
-      {section !== "add-product" && <Link href="/dashboard/add-product" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#bf6d68] px-5 py-3 text-sm font-bold text-white"><Plus size={18} /> Add product</Link>}
+      {section !== "add-product" && section !== "payouts" && <Link href="/dashboard/add-product" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#bf6d68] px-5 py-3 text-sm font-bold text-white"><Plus size={18} /> Add product</Link>}
     </div>
     <div className="mt-7">{renderSection(section)}</div>
   </div>;
@@ -198,7 +199,7 @@ function renderSection(section: string) {
   if (section === "orders") return <SellerOperations workspace="orders" />;
   if (section === "inventory") return <SellerOperations workspace="inventory" />;
   if (section === "customers" || section === "reviews" || section === "promotions" || section === "analytics" || section === "store-profile" || section === "settings") return <SellerBusinessTools section={section} />;
-  if (section === "payouts") return <SellerOperations workspace="payouts" />;
+  if (section === "payouts") return <SellerCommissionCenter />;
   return <SellerProductManager mode="list" />;
 }
 

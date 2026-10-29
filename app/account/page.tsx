@@ -9,7 +9,8 @@ export const metadata: Metadata = {
   description: "Open the BelGlow workspace connected to your account.",
 };
 
-export default async function AccountPage() {
+export default async function AccountPage({ searchParams }: { searchParams: Promise<{ order?: string | string[] }> }) {
+  const requestedOrder = Number((await searchParams).order);
   const current = await getCurrentProfile();
 
   if (!current) redirect("/?login=required");
@@ -19,7 +20,7 @@ export default async function AccountPage() {
   const [{ data: orders }, { data: addresses }] = await Promise.all([
     supabase
       .from("orders")
-      .select("id, order_number, status, payment_status, fulfillment_status, total_cents, placed_at")
+      .select("id, order_number, status, payment_status, fulfillment_status, total_cents, placed_at, payments(provider)")
       .eq("user_id", current.user.id)
       .order("placed_at", { ascending: false })
       .limit(8),
@@ -31,14 +32,25 @@ export default async function AccountPage() {
       .limit(3),
   ]);
 
+  const enrichedOrders = await Promise.all((orders ?? []).map(async (order) => {
+    const paymentProvider = order.payments?.[0]?.provider;
+    if (paymentProvider !== "bank_transfer") return { ...order, payment_attention: null };
+    const { data } = await supabase.rpc("get_order_payment_details", { lookup_order_number: order.order_number, lookup_email: current.user.email ?? "" });
+    const sellers = ((data as { sellers?: Array<{ paymentStatus?: string }> } | null)?.sellers ?? []);
+    const statuses = sellers.map((seller) => seller.paymentStatus);
+    const paymentAttention: "rejected" | "under_review" | "awaiting_payment" | "confirmed" | null = statuses.includes("rejected") ? "rejected" : statuses.includes("under_review") ? "under_review" : statuses.includes("awaiting_payment") ? "awaiting_payment" : statuses.length > 0 && statuses.every((status) => status === "confirmed") ? "confirmed" : null;
+    return { ...order, payment_attention: paymentAttention };
+  }));
+
   return (
     <CustomerDashboard
       name={current.profile.full_name || current.user.user_metadata?.full_name || current.user.email?.split("@")[0] || "BelGlow shopper"}
       email={current.user.email ?? ""}
       phone={current.profile.phone ?? ""}
       role={accountRole}
-      orders={orders ?? []}
+      orders={enrichedOrders}
       addresses={addresses ?? []}
+      initialOrderNumber={Number.isSafeInteger(requestedOrder) && requestedOrder > 0 ? requestedOrder : undefined}
     />
   );
 }
