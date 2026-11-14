@@ -6,7 +6,7 @@ BelGlow is a multi-vendor beauty marketplace built with Next.js 16, React 19, Ta
 
 1. Use Node.js 22 or later.
 2. Install dependencies with `npm install`.
-3. Configure `.env` with the Supabase project URL and keys.
+3. Copy `.env.example` to `.env.local` and replace the two Supabase placeholders with the Project URL and publishable key from **Supabase Dashboard → Project Settings → API**. Restart `npm run dev` after changing environment values.
 4. Apply every SQL file in `supabase/migrations` in filename order.
 5. Run `supabase/seed.sql` for the initial inventory location, delivery methods, and seller-facing categories. Products are created by approved sellers only.
 6. Start the app with `npm run dev`.

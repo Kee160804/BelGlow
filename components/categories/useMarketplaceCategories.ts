@@ -2,13 +2,17 @@
 
 import { useEffect, useState } from "react";
 import type { MarketplaceCategory } from "@/lib/marketplace-categories";
-import { createClient } from "@/utils/supabase/client";
+import { createClient, hasSupabaseConfig } from "@/utils/supabase/client";
 
 export function useMarketplaceCategories() {
   const [categories, setCategories] = useState<MarketplaceCategory[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!hasSupabaseConfig()) {
+      setLoading(false);
+      return;
+    }
     let active = true;
     async function load() {
       const { data } = await createClient()

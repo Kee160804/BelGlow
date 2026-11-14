@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createClient } from "@/utils/supabase/client";
+import { createClient, hasSupabaseConfig } from "@/utils/supabase/client";
 
 const INACTIVITY_LIMIT_MS = 20 * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 5 * 1000;
@@ -39,6 +39,7 @@ export default function SessionTimeout() {
   }, []);
 
   useEffect(() => {
+    if (!hasSupabaseConfig()) return;
     const supabase = createClient();
     let active = true;
 

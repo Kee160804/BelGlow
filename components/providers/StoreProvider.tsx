@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, ReactNode, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Heart, Mail, Minus, ShoppingBag, Sparkles, Store, UserRound, X } from "lucide-react";
 import { type StoreProduct } from "@/lib/catalog";
-import { createClient } from "@/utils/supabase/client";
+import { createClient, hasSupabaseConfig } from "@/utils/supabase/client";
 
 const ProductPreviewModal = dynamic(() => import("@/components/products/ProductPreviewModal"));
 
@@ -120,6 +120,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!hasSupabaseConfig()) return;
     const supabase = createClient();
     let active = true;
 
@@ -180,7 +181,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!shouldLoadShoppingData) return;
+    if (!shouldLoadShoppingData || !hasSupabaseConfig()) return;
     const supabase = createClient();
     let active = true;
 
@@ -290,12 +291,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [shouldLoadShoppingData]);
 
   useEffect(() => {
+    if (!currentUser || !shouldLoadShoppingData || !hasSupabaseConfig()) return;
     const supabase = createClient();
     let active = true;
-
-    if (!currentUser || !shouldLoadShoppingData) {
-      return () => { active = false; };
-    } else {
+    {
       const currentUserId = currentUser.id;
       async function hydrateSignedInCart() {
         const savedGuestCart = guestCartRef.current;
@@ -324,12 +323,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [currentUser, catalogProducts, shouldLoadShoppingData]);
 
   useEffect(() => {
+    if (!currentUser || !shouldLoadShoppingData || !hasSupabaseConfig()) return;
     const supabase = createClient();
     let active = true;
-
-    if (!currentUser || !shouldLoadShoppingData) {
-      return () => { active = false; };
-    }
 
     async function hydrateSignedInWishlist() {
       let { data: wishlist } = await supabase
