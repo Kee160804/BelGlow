@@ -1,11 +1,24 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { allowPublicRequest } from "@/lib/rate-limit";
 
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 
+function matchesFileSignature(type: string, bytes: Uint8Array) {
+  if (type === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (type === "image/png") return bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  if (type === "image/webp") return String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+  if (type === "application/pdf") return String.fromCharCode(...bytes.slice(0, 5)) === "%PDF-";
+  return false;
+}
+
 export async function POST(request: Request) {
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (contentLength > 5 * 1024 * 1024 + 64 * 1024) {
+    return NextResponse.json({ error: "The upload is larger than 5 MB." }, { status: 413 });
+  }
+
   let form: FormData;
   try { form = await request.formData(); } catch { return NextResponse.json({ error: "Invalid upload." }, { status: 400 }); }
   const orderNumber = Number(form.get("orderNumber"));
@@ -19,13 +32,12 @@ export async function POST(request: Request) {
   if (!allowedTypes.has(receipt.type) || receipt.size < 1 || receipt.size > 5 * 1024 * 1024) {
     return NextResponse.json({ error: "Upload a JPG, PNG, WebP, or PDF no larger than 5 MB." }, { status: 400 });
   }
+  const bytes = new Uint8Array(await receipt.arrayBuffer());
+  if (!matchesFileSignature(receipt.type, bytes)) {
+    return NextResponse.json({ error: "The file contents do not match the selected file type." }, { status: 400 });
+  }
 
-  const publicClient = await createClient();
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const fingerprint = createHash("sha256").update(`${forwarded}:${email}`).digest("hex");
-  const { data: allowed } = await publicClient.rpc("consume_public_rate_limit", {
-    rate_bucket: "payment_receipt", rate_subject_hash: fingerprint, rate_max_requests: 8, rate_window_seconds: 3600,
-  });
+  const allowed = await allowPublicRequest(request, "payment_receipt", email, 8, 3600);
   if (!allowed) return NextResponse.json({ error: "Too many uploads. Please wait before trying again." }, { status: 429 });
 
   const admin = createAdminClient();
@@ -43,17 +55,23 @@ export async function POST(request: Request) {
 
   const extension = receipt.type === "application/pdf" ? "pdf" : receipt.type.split("/")[1].replace("jpeg", "jpg");
   const path = `${sellerOrder.seller_store_id}/${sellerOrderId}/${randomUUID()}.${extension}`;
-  const bytes = new Uint8Array(await receipt.arrayBuffer());
   const { error: uploadError } = await admin.storage.from("payment-receipts").upload(path, bytes, { contentType: receipt.type, upsert: false });
   if (uploadError) return NextResponse.json({ error: "The receipt could not be stored. Please try again." }, { status: 500 });
-  const { error: insertError } = await admin.from("seller_payment_submissions").insert({
+  const { data: submission, error: insertError } = await admin.from("seller_payment_submissions").insert({
     seller_order_id: sellerOrderId, receipt_path: path, original_filename: receipt.name.slice(0, 240),
     mime_type: receipt.type, file_size_bytes: receipt.size, customer_reference: reference || null,
-  });
+  }).select("id").single();
   if (insertError) {
     await admin.storage.from("payment-receipts").remove([path]);
-    return NextResponse.json({ error: insertError.message }, { status: 400 });
+    console.error("Payment receipt metadata could not be saved:", insertError.message);
+    return NextResponse.json({ error: "The receipt could not be recorded. Please try again." }, { status: 500 });
   }
-  await admin.from("seller_orders").update({ payment_status: "under_review" }).eq("id", sellerOrderId);
+  const { error: statusError } = await admin.from("seller_orders").update({ payment_status: "under_review" }).eq("id", sellerOrderId);
+  if (statusError) {
+    if (submission) await admin.from("seller_payment_submissions").delete().eq("id", submission.id);
+    await admin.storage.from("payment-receipts").remove([path]);
+    console.error("Seller payment status could not be updated:", statusError.message);
+    return NextResponse.json({ error: "The receipt was uploaded but could not be submitted for review. Please try again." }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

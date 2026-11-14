@@ -137,6 +137,7 @@ export default function GuestCheckout() {
       <p className="mt-3 text-xs text-[#75696b]">Order details were sent to <strong className="text-[#292527]">{confirmation.email}</strong>.</p>
       <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
         {userName && <Link href={`/account?order=${confirmation.orderNumber}`} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#ef4b74] px-6 py-3 text-sm font-bold text-white shadow-sm"><ShoppingBag size={17} />View order details</Link>}
+        {!userName && <Link href={`/track-order?order=${confirmation.orderNumber}`} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#ef4b74] px-6 py-3 text-sm font-bold text-white shadow-sm"><ShoppingBag size={17} />Track this order</Link>}
         <Link href="/shop" className="inline-flex items-center justify-center rounded-xl border border-[#ef4b74] bg-white px-6 py-3 text-sm font-bold text-[#df3765]">Continue shopping</Link>
       </div>
     </div>

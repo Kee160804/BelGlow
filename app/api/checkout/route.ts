@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { createHash } from "node:crypto";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { allowPublicRequest } from "@/lib/rate-limit";
 import { deliverPendingEmails } from "@/lib/resend";
 
 type CheckoutBody = {
@@ -40,9 +41,7 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const fingerprint = createHash("sha256").update(`${forwarded}:${String(body.email).trim().toLowerCase()}`).digest("hex");
-  const { data: allowed } = await supabase.rpc("consume_public_rate_limit", { rate_bucket: "checkout", rate_subject_hash: fingerprint, rate_max_requests: 12, rate_window_seconds: 3600 });
+  const allowed = await allowPublicRequest(request, "checkout", String(body.email), 12, 3600);
   if (!allowed) return NextResponse.json({ error: "Too many checkout attempts. Please wait before trying again." }, { status: 429 });
 
   // Sellers receive bank transfers directly. BelGlow never collects bank or
@@ -78,7 +77,7 @@ export async function POST(request: Request) {
   const order = Array.isArray(data) ? data[0] : data;
   if (!order) return NextResponse.json({ error: "The order could not be created." }, { status: 500 });
 
-  const { data: paymentDetails } = paymentMethod === "bank_transfer" ? await supabase.rpc("get_order_payment_details", {
+  const { data: paymentDetails } = paymentMethod === "bank_transfer" ? await createAdminClient().rpc("get_order_payment_details", {
     lookup_order_number: order.created_order_number, lookup_email: body.email,
   }) : { data: null };
   try { await deliverPendingEmails({ orderId: order.created_order_id }); }

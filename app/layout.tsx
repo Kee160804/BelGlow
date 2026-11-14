@@ -18,7 +18,7 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://belglow.com"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://belglow.store"),
   title: { default: "BelGlow | Belizean Beauty Marketplace", template: "%s | BelGlow" },
   description: "Shop beauty and self-care products from independent Belizean sellers on BelGlow.",
   applicationName: "BelGlow",

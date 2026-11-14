@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import {
   ArrowUpRight, BarChart3, BadgePercent, Boxes, ChevronDown,
-  House, LogOut, Menu, Package, Plus, Search,
+  House, LayoutGrid, LogOut, Menu, Package, Plus, Search,
   Settings, ShoppingBag, Star, Store, Users, WalletCards, X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -124,7 +124,7 @@ export default function SellerDashboard({ accountRole, initialUserName }: { acco
 
   return <main className="h-dvh overflow-hidden bg-[#efe4df] p-0 text-[#292527] lg:p-5">
     <div className="mx-auto grid h-dvh min-h-0 max-w-[1600px] overflow-hidden bg-[#faf7f5] shadow-[0_26px_90px_rgba(76,46,40,.16)] lg:h-[calc(100dvh-40px)] lg:grid-cols-[244px_1fr] lg:rounded-[28px]">
-      <aside className={`fixed inset-y-0 left-0 z-50 flex h-full w-[270px] flex-col overflow-hidden border-r border-[#eadeda] bg-[#fbf6f3] p-5 transition-transform lg:static lg:w-auto lg:translate-x-0 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 flex h-full w-[270px] flex-col overflow-y-auto border-r border-[#eadeda] bg-[#fbf6f3] p-5 pb-[calc(6rem+env(safe-area-inset-bottom))] transition-transform lg:static lg:w-auto lg:translate-x-0 lg:overflow-hidden lg:pb-5 ${menuOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between px-2 py-2">
           <Link href="/" className="flex items-center gap-2" aria-label="BelGlow marketplace"><BrandMark /><div><p className="font-serif text-3xl leading-none">Bel<span className="text-[#b86160]">Glow</span></p><p className="mt-1 text-[7px] font-bold uppercase tracking-[.26em] text-[#9b6461]">Beauty beyond borders</p></div></Link>
           <button onClick={() => setMenuOpen(false)} className="rounded-full p-2 lg:hidden" aria-label="Close navigation"><X size={21} /></button>
@@ -141,7 +141,7 @@ export default function SellerDashboard({ accountRole, initialUserName }: { acco
 
       {menuOpen && <button className="fixed inset-0 z-40 bg-black/25 lg:hidden" onClick={() => setMenuOpen(false)} aria-label="Close navigation overlay" />}
 
-      <div className="h-full min-h-0 min-w-0 overflow-y-auto">
+      <div className="h-full min-h-0 min-w-0 overflow-y-auto pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-0">
         <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-[#ebe1dd] bg-white/90 px-4 backdrop-blur sm:px-7">
           <button onClick={() => setMenuOpen(true)} className="rounded-xl border border-[#eadeda] p-2.5 lg:hidden" aria-label="Open navigation"><Menu size={20} /></button>
           <DashboardSwitcher role={accountRole} />
@@ -164,8 +164,37 @@ export default function SellerDashboard({ accountRole, initialUserName }: { acco
 
         {pathname === "/dashboard" ? <SellerOverview userName={userName} /> : <SectionWorkspace section={pathname.split("/").filter(Boolean).at(-1) ?? "dashboard"} />}
       </div>
+      <nav aria-label="Seller app navigation" className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-[#091323] pb-[env(safe-area-inset-bottom)] text-slate-300 shadow-[0_-8px_28px_rgba(9,19,35,.22)] lg:hidden">
+        <div className="grid h-[68px] grid-cols-5 items-center px-2">
+          <MobileNavLink href="/dashboard" label="Home" icon={House} active={pathname === "/dashboard"} />
+          <MobileNavLink href="/dashboard/products" label="Products" icon={Package} active={pathname.startsWith("/dashboard/products")} />
+          <MobileNavLink href="/dashboard/add-product" label="Add" icon={Plus} active={pathname === "/dashboard/add-product"} prominent />
+          <MobileNavLink href="/dashboard/orders" label="Orders" icon={ShoppingBag} active={pathname === "/dashboard/orders"} badge={openOrderCount} />
+          <button type="button" onClick={() => setMenuOpen(true)} aria-label="Open more seller tools" aria-expanded={menuOpen} className={`flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-colors ${menuOpen || (!pathname.match(/^\/dashboard(?:\/products|\/add-product|\/orders)?$/)) ? "text-[#ff7093]" : "text-slate-400 hover:text-white"}`}>
+            <LayoutGrid size={22} strokeWidth={2.2} />
+            <span>More</span>
+          </button>
+        </div>
+      </nav>
     </div>
   </main>;
+}
+
+function MobileNavLink({ href, label, icon: Icon, active, prominent = false, badge = 0 }: {
+  href: string;
+  label: string;
+  icon: typeof House;
+  active: boolean;
+  prominent?: boolean;
+  badge?: number;
+}) {
+  return <Link href={href} aria-label={label} aria-current={active ? "page" : undefined} className={`relative flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-semibold transition-colors ${prominent ? "-translate-y-3 text-white" : active ? "text-[#ff7093]" : "text-slate-400 hover:text-white"}`}>
+    <span className={prominent ? "grid h-[58px] w-[58px] place-items-center rounded-full bg-gradient-to-br from-[#ff6b91] to-[#db2862] text-white shadow-[0_0_0_7px_#091323,0_8px_24px_rgba(239,75,116,.4)]" : "relative grid h-7 place-items-center"}>
+      <Icon size={prominent ? 29 : 22} strokeWidth={prominent ? 2.5 : 2.2} />
+      {!prominent && badge > 0 && <span className="absolute -right-3 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-[#ff6b91] px-1 text-[9px] font-bold text-white">{badge > 99 ? "99+" : badge}</span>}
+    </span>
+    <span>{label}</span>
+  </Link>;
 }
 
 const sectionCopy: Record<string, { eyebrow: string; title: string; description: string }> = {

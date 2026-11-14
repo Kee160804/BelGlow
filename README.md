@@ -6,7 +6,7 @@ BelGlow is a multi-vendor beauty marketplace built with Next.js 16, React 19, Ta
 
 1. Use Node.js 22 or later.
 2. Install dependencies with `npm install`.
-3. Copy `.env.example` to `.env.local` and replace the two Supabase placeholders with the Project URL and publishable key from **Supabase Dashboard → Project Settings → API**. Restart `npm run dev` after changing environment values.
+3. Copy `.env.example` to `.env.local` (or use a local `.env`) and replace the Supabase placeholders with the Project URL and publishable key from the Supabase project **Connect** dialog. Add the server-only service role key for admin operations, receipt uploads, and Resend outbox delivery. Restart `npm run dev` after changing environment values.
 4. Apply every SQL file in `supabase/migrations` in filename order.
 5. Run `supabase/seed.sql` for the initial inventory location, delivery methods, and seller-facing categories. Products are created by approved sellers only.
 6. Start the app with `npm run dev`.
@@ -57,8 +57,10 @@ npm run build
 
 - Run on Node.js 22+.
 - Apply and verify all migrations in a staging Supabase project first.
+- Apply `20261115000000_production_public_rpc_hardening.sql` before deploying the API changes in this release; it restricts internal RPCs to the server role and adds a database-side checkout limit.
 - Configure production Auth redirect URLs and Google OAuth credentials.
 - Verify the `product-images` storage bucket and its policies.
 - Replace `bank_transfer` only after implementing and testing the chosen processor's hosted checkout, signed webhook, marketplace settlement, and refund flow.
 - Verify the Resend sending domain and schedule the protected email-outbox retry endpoint.
+- Configure the same production environment variables in the hosting provider; `NEXT_PUBLIC_SITE_URL` must be the live BelGlow origin, and server keys must not use the `NEXT_PUBLIC_` prefix.
 - Enable platform monitoring, backups, rate limiting, and a tested recovery process.

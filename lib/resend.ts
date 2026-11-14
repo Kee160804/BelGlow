@@ -4,6 +4,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
 
 type OutboxRow = {
   id: string;
+  kind: string;
   recipient_email: string;
   subject: string;
   body: string;
@@ -22,7 +23,7 @@ async function sendWithResend(message: OutboxRow) {
   if (!apiKey || !from) throw new Error("Resend is not configured.");
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       from,
       to: [message.recipient_email],
@@ -31,6 +32,11 @@ async function sendWithResend(message: OutboxRow) {
       text: message.body,
       html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#292527"><div style="border-bottom:3px solid #ef4b74;padding:18px 0"><strong style="font-size:24px">Bel<span style="color:#ef4b74">Glow</span></strong></div><h1 style="font-size:24px;margin:28px 0 12px">${escapeHtml(message.subject)}</h1><p style="font-size:16px;line-height:1.7">${escapeHtml(message.body)}</p><p style="margin-top:30px;color:#75696b;font-size:13px">This is an automated order email from BelGlow.</p></div>`,
     }),
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+      "Idempotency-Key": `belglow/${message.kind}/${message.id}`,
+    },
   });
   if (!response.ok) throw new Error(`Resend returned ${response.status}: ${(await response.text()).slice(0, 300)}`);
 }
@@ -40,7 +46,7 @@ export async function deliverPendingEmails(options: { orderId?: string; limit?: 
   const admin = createAdminClient();
   await admin.from("notification_outbox").update({ status: "failed", last_error: "Delivery worker was interrupted; retrying." })
     .eq("status", "processing").lt("updated_at", new Date(Date.now() - 5 * 60_000).toISOString());
-  let query = admin.from("notification_outbox").select("id, recipient_email, subject, body, attempts")
+  let query = admin.from("notification_outbox").select("id, kind, recipient_email, subject, body, attempts")
     .in("status", ["pending", "failed"]).lt("attempts", 3).order("created_at").limit(options.limit ?? 20);
   if (options.orderId) query = query.eq("order_id", options.orderId);
   const { data, error } = await query;

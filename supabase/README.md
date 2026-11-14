@@ -82,7 +82,7 @@ npx supabase db push
 
 Do not run a destructive remote reset against production. Seed data is intended for local, test, or explicitly disposable staging environments.
 
-## Future Next.js integration
+## Next.js integration boundaries
 
 The expected public environment variables are:
 
@@ -94,10 +94,10 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 Any secret/service-role key must remain server-only and must never use the `NEXT_PUBLIC_` prefix. Recommended application boundaries:
 
 1. Browser client: public catalog reads and RLS-protected customer records.
-2. Server client: checkout, guest-cart ownership, inventory reservation, payment webhooks, admin operations, and role changes.
+2. Cookie-backed server client: user-scoped checkout and account operations. Server-only service-role client: protected order lookups, support submission, rate limiting, receipt storage, email delivery, and privileged admin operations.
 3. Supabase Auth: email/password and Google sign-in; the database trigger creates the matching shopper profile and default wishlist. Seller access starts only after an approved seller application.
 
-Before production launch, add payment-provider webhook handling, refund allocation, payout-provider transfers, transactional stock reservation, tax rules, delivery-zone validation, seller identity/bank verification, and automated database/RLS tests.
+The public lookup, support, and rate-limit RPCs are restricted to the server role by `20261115000000_production_public_rpc_hardening.sql`. Apply that migration before deploying the matching API changes. Checkout order creation remains callable for guest checkout, with additional database-side per-email throttling.
 
 ## Current application integration status
 
@@ -109,6 +109,6 @@ Platform administrator privileges are stored independently in `platform_admins`;
 
 Apply all migrations, including `20261003000000_marketplace_workflows.sql`, before using these screens against a Supabase project. Configure the Supabase Auth site URL and allowed redirect URLs for `/auth/callback` and `/auth/update-password`. Enable Google in Supabase Auth before offering that provider. Promote the first BelGlow administrator through a trusted Supabase SQL session; never allow users to select their own `admin` role.
 
-The checkout page intentionally does not create orders or claim payments succeeded. The exact payment processor was not provided, and a Belize merchant needs a provider confirmed to support the platform's country, BZD or chosen settlement currency, marketplace split/commission collection, verified webhooks, refunds, and seller payouts. Do not accept real orders until that provider-specific integration is implemented and tested. The same external payout integration is required before money can be sent to sellers. See `.env.example` for the public and provider configuration variable names; actual credentials belong only in the ignored local `.env` or deployment secret store.
+Checkout currently creates orders for manual seller bank transfer or payment due at delivery/pickup. It does not connect Belize Bank subscription checkout or mark external payments as verified. Do not enable subscription checkout or claim a payment succeeded until provider-specific signed requests, webhook verification, refunds, settlement, and payout flows are implemented and tested. See `.env.example` for variable names; actual credentials belong only in an ignored local env file or deployment secret store.
 
 The seller and admin order/payout views can display existing database records, but some advanced operations (refunds, shipping labels, automated transfers, full tax calculation, and notification delivery) still require provider and business-policy configuration.
