@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { Check, CircleDollarSign, Clock, PackageCheck, Store, Trash2, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { isExternalProductImage } from "@/lib/product-image-url";
 import AdminAccessManager from "@/components/admin/AdminAccessManager";
 import AdminCategoryManager from "@/components/admin/AdminCategoryManager";
 import AdminShippingManager from "@/components/admin/AdminShippingManager";
@@ -107,7 +108,7 @@ export default function AdminMarketplaceTools({ section }: { section: Section })
     setRefunds((refundResult.data ?? []) as RefundRow[]);
     setStoreNames(new Map(sellerRows.map((seller) => [seller.id, seller.name])));
     const firstImages = new Map<string, string>();
-    for (const row of imageResult.data ?? []) if (!firstImages.has(row.product_id)) firstImages.set(row.product_id, supabase.storage.from("product-images").getPublicUrl(row.storage_path).data.publicUrl);
+    for (const row of imageResult.data ?? []) if (!firstImages.has(row.product_id)) firstImages.set(row.product_id, isExternalProductImage(row.storage_path) ? row.storage_path : supabase.storage.from("product-images").getPublicUrl(row.storage_path).data.publicUrl);
     setProductImages(firstImages);
     if (settingsResult.data) {
       setCommissionBps(settingsResult.data.default_commission_bps);
@@ -221,16 +222,6 @@ export default function AdminMarketplaceTools({ section }: { section: Section })
       setApplicationsOpen(open);
       setNotice("Seller application setting saved.");
     }
-  }
-
-  async function seedPaymentDemoCatalog() {
-    setBusyId("demo-catalog");
-    setError("");
-    setNotice("");
-    const { data, error: resultError } = await createClient().rpc("admin_seed_payment_demo_products");
-    setBusyId("");
-    if (resultError) setError(resultError.message);
-    else setNotice(`${Number(data ?? 0)} payment demo products are ready—one for each active main category.`);
   }
 
   async function setSellerStatus(seller: SellerRow, status: "approved" | "suspended") {
@@ -432,7 +423,7 @@ export default function AdminMarketplaceTools({ section }: { section: Section })
     {customerHistory && <CustomerHistoryModal history={customerHistory} onClose={() => setCustomerHistory(null)} />}
     {sellerHistory && <SellerHistoryModal history={sellerHistory} onClose={() => setSellerHistory(null)} />}
 
-    {section === "categories" && !loading && <><section className="rounded-2xl border border-[#e9dfdc] bg-white p-5"><div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-lg font-bold">Payment integration test catalog</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-[#756a6d]">Create or refresh one clearly labeled demo product in every active main category. These products use the official store and a non-payable demo bank account.</p></div><button type="button" disabled={Boolean(busyId)} onClick={() => void seedPaymentDemoCatalog()} className="rounded-xl bg-[#292326] px-4 py-3 text-sm font-bold text-white disabled:opacity-50">{busyId === "demo-catalog" ? "Preparing demos…" : "Create demo products"}</button></div></section><AdminCategoryManager /></>}
+    {section === "categories" && !loading && <AdminCategoryManager />}
 
     {section === "settings" && !loading && <div className="grid gap-5 xl:grid-cols-2"><section className="rounded-2xl border border-[#e9dfdc] bg-white p-6"><h2 className="text-lg font-bold">Seller onboarding</h2><p className="mt-2 text-sm leading-6 text-[#756a6d]">Control whether customers may submit new seller applications.</p><label className="mt-5 flex items-center justify-between gap-4 text-sm font-semibold">Accept seller applications<input type="checkbox" checked={applicationsOpen} disabled={busyId === "settings"} onChange={(event) => void updateApplicationsOpen(event.target.checked)} className="h-5 w-5 accent-[#b85f5d]" /></label></section><AdminAccessManager /><AdminShippingManager /></div>}
   </div>;

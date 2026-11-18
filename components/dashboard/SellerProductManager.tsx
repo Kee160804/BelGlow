@@ -7,6 +7,7 @@ import { ChevronUp, CirclePlus, Edit3, ImagePlus, Package, Save, X } from "lucid
 import { createClient } from "@/utils/supabase/client";
 import { createSellerProduct, updateSellerProduct } from "@/app/dashboard/products/actions";
 import { categoryChildren, rootCategories } from "@/lib/marketplace-categories";
+import { isExternalProductImage } from "@/lib/product-image-url";
 
 type ProductVariant = { id?: string; name: string; price: string; quantity: number };
 type SellerProduct = {
@@ -33,21 +34,27 @@ export default function SellerProductManager({ mode }: { mode: "list" | "create"
   const [products, setProducts] = useState<SellerProduct[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [toast, setToast] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formVersion, setFormVersion] = useState(0);
 
+  const notify = useCallback((tone: "success" | "error", message: string) => setToast({ tone, message }), []);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   const loadProducts = useCallback(async () => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setError("Sign in again to manage your products."); setLoading(false); return; }
+    if (!user) { notify("error", "Sign in again to manage your products."); setLoading(false); return; }
     const [{ data: store }, { data: categoryRows, error: categoryError }] = await Promise.all([
       supabase.from("seller_stores").select("id").eq("owner_id", user.id).maybeSingle(),
       supabase.from("categories").select("id, parent_id, slug, name, description, image_url, sort_order, is_active").eq("is_active", true).order("sort_order").order("name"),
     ]);
-    if (categoryError) setError(categoryError.message);
+    if (categoryError) notify("error", `Could not load product categories: ${categoryError.message}`);
     const availableCategories = (categoryRows ?? []) as Category[];
     setCategories(availableCategories);
     if (!store) { setProducts([]); setLoading(false); return; }
@@ -55,7 +62,7 @@ export default function SellerProductManager({ mode }: { mode: "list" | "create"
     const { data: rows, error: productError } = await supabase.from("products")
       .select("id, name, short_description, description, ingredients, usage_instructions, attributes, compare_at_price_cents, base_price_cents, status, review_status, rejection_reason, created_at")
       .eq("seller_store_id", store.id).order("created_at", { ascending: false });
-    if (productError) { setError(productError.message); setLoading(false); return; }
+    if (productError) { notify("error", `Could not load your products: ${productError.message}`); setLoading(false); return; }
     const productRows = rows ?? [];
     const ids = productRows.map((product) => product.id);
     if (!ids.length) { setProducts([]); setLoading(false); return; }
@@ -85,7 +92,7 @@ export default function SellerProductManager({ mode }: { mode: "list" | "create"
       variants: variantsByProduct.get(product.id) ?? [{ name: "Default", price: (product.base_price_cents / 100).toFixed(2), quantity: 0 }],
     })));
     setLoading(false);
-  }, []);
+  }, [notify]);
 
   useEffect(() => { const timer = window.setTimeout(() => void loadProducts(), 0); return () => window.clearTimeout(timer); }, [loadProducts]);
 
@@ -99,37 +106,57 @@ export default function SellerProductManager({ mode }: { mode: "list" | "create"
 
   async function submit(event: FormEvent<HTMLFormElement>, product?: SellerProduct) {
     event.preventDefault();
-    setSaving(true); setError(""); setMessage("");
-    const result = product ? await updateSellerProduct(new FormData(event.currentTarget)) : await createSellerProduct(new FormData(event.currentTarget));
-    setSaving(false);
-    if (result.error) { setError(result.error); return; }
-    setMessage(result.message ?? "Product saved.");
-    setEditingId(null);
-    setFormVersion((current) => current + 1);
-    await loadProducts();
+    setSaving(true); setToast(null);
+    try {
+      const result = product ? await updateSellerProduct(new FormData(event.currentTarget)) : await createSellerProduct(new FormData(event.currentTarget));
+      if (result.error) { notify("error", result.error); return; }
+      notify("success", result.message ?? "Product saved.");
+      setEditingId(null);
+      setFormVersion((current) => current + 1);
+      await loadProducts();
+    } catch (cause) {
+      notify("error", cause instanceof Error ? cause.message : "The product could not be saved. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  if (mode === "create" && loading) return <p className="rounded-2xl border border-[#ede3df] bg-white py-12 text-center text-sm text-[#817679]">Loading store categories…</p>;
+  if (mode === "create" && loading) return <><Toast toast={toast} dismiss={() => setToast(null)} /><p className="rounded-2xl border border-[#ede3df] bg-white py-12 text-center text-sm text-[#817679]">Loading store categories…</p></>;
 
-  if (mode === "create") return <div>
+  if (mode === "create") return <>
+    <Toast toast={toast} dismiss={() => setToast(null)} />
     <ProductEditor key={formVersion} categories={categories} saving={saving} onSubmit={(event) => void submit(event)} />
-    <Feedback error={error} message={message} />
-  </div>;
+  </>;
 
-  return <section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm">
+  return <>
+  <Toast toast={toast} dismiss={() => setToast(null)} />
+  <section className="rounded-2xl border border-[#ede3df] bg-white p-5 shadow-sm">
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="text-lg font-bold">Your product listings</h2><p className="mt-1 text-sm text-[#7b7072]">Edit prices, stock, sizes, photos, and storefront information from one list.</p></div><Link href="/dashboard/add-product" className="rounded-xl bg-[#bf6d68] px-4 py-2.5 text-center text-sm font-bold text-white">Add a different product</Link></div>
-    <Feedback error={error} message={message} />
     {loading ? <p className="py-12 text-center text-sm text-[#817679]">Loading products…</p> : products.length === 0 ? <p className="mt-5 rounded-2xl bg-[#fbf4f2] p-8 text-center text-sm text-[#756a6d]">No products yet. Add your first product to start your seller catalog.</p> : <div className="mt-5 space-y-3">{products.map((product) => {
-      const { data } = product.imagePath ? createClient().storage.from("product-images").getPublicUrl(product.imagePath) : { data: { publicUrl: "" } };
+      const imageUrl = product.imagePath
+        ? isExternalProductImage(product.imagePath) ? product.imagePath : createClient().storage.from("product-images").getPublicUrl(product.imagePath).data.publicUrl
+        : "";
       const status = product.review_status === "submitted" ? "In review" : product.review_status === "approved" ? "Live" : product.rejection_reason ? "Changes requested" : "Draft";
       const stock = product.variants.reduce((total, variant) => total + variant.quantity, 0);
       const editing = editingId === product.id;
       return <article key={product.id} className="overflow-hidden rounded-2xl border border-[#eee5e1]">
-        <div className="grid gap-4 p-4 sm:grid-cols-[72px_1fr_auto] sm:items-center"><div className="relative h-18 w-18 overflow-hidden rounded-xl bg-[#fff0f4]">{data.publicUrl ? <Image src={data.publicUrl} alt="" fill sizes="72px" unoptimized className="object-cover" /> : <Image src="/images/belglow-hero-products.png" alt="" fill sizes="72px" className="scale-150 object-cover" />}</div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-bold">{product.name}</h3><span className="rounded-full bg-[#fff3ef] px-2.5 py-1 text-xs font-semibold text-[#9b5a57]">{status}</span></div><p className="mt-1 text-sm text-[#6f6568]">From BZ${(product.base_price_cents / 100).toFixed(2)} · <strong className={stock <= 5 ? "text-orange-700" : "text-emerald-700"}>{stock} in stock</strong> · {product.variants.length} {product.variants.length === 1 ? "option" : "options"}</p>{product.rejection_reason && <p className="mt-1 text-xs text-rose-700">Admin note: {product.rejection_reason}</p>}</div><button disabled={product.review_status === "submitted"} onClick={() => setEditingId(editing ? null : product.id)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#d9c2bd] px-4 py-2.5 text-sm font-bold text-[#9b5a57] disabled:cursor-not-allowed disabled:opacity-45">{editing ? <ChevronUp size={17} /> : <Edit3 size={17} />}{editing ? "Close editor" : product.review_status === "submitted" ? "Under review" : "Edit product"}</button></div>
+        <div className="grid gap-4 p-4 sm:grid-cols-[72px_1fr_auto] sm:items-center"><div className="relative h-18 w-18 overflow-hidden rounded-xl bg-[#fff0f4]">{imageUrl ? <Image src={imageUrl} alt="" fill sizes="72px" unoptimized className="object-cover" /> : <Image src="/images/belglow-hero-products.png" alt="" fill sizes="72px" className="scale-150 object-cover" />}</div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-bold">{product.name}</h3><span className="rounded-full bg-[#fff3ef] px-2.5 py-1 text-xs font-semibold text-[#9b5a57]">{status}</span></div><p className="mt-1 text-sm text-[#6f6568]">From BZ${(product.base_price_cents / 100).toFixed(2)} · <strong className={stock <= 5 ? "text-orange-700" : "text-emerald-700"}>{stock} in stock</strong> · {product.variants.length} {product.variants.length === 1 ? "option" : "options"}</p>{product.rejection_reason && <p className="mt-1 text-xs text-rose-700">Admin note: {product.rejection_reason}</p>}</div><button disabled={product.review_status === "submitted"} onClick={() => setEditingId(editing ? null : product.id)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#d9c2bd] px-4 py-2.5 text-sm font-bold text-[#9b5a57] disabled:cursor-not-allowed disabled:opacity-45">{editing ? <ChevronUp size={17} /> : <Edit3 size={17} />}{editing ? "Close editor" : product.review_status === "submitted" ? "Under review" : "Edit product"}</button></div>
         {editing && <div className="border-t border-[#eee5e1] bg-[#fcfaf9] p-4 sm:p-6"><ProductEditor categories={categories} product={product} saving={saving} onSubmit={(event) => void submit(event, product)} onCancel={() => setEditingId(null)} /></div>}
       </article>;
     })}</div>}
-  </section>;
+  </section>
+  </>;
+}
+
+function Toast({ toast, dismiss }: { toast: { tone: "success" | "error"; message: string } | null; dismiss: () => void }) {
+  if (!toast) return null;
+  const success = toast.tone === "success";
+  return <div className="pointer-events-none fixed inset-x-4 top-4 z-[100] flex justify-center sm:justify-end" aria-live={success ? "polite" : "assertive"}>
+    <div role={success ? "status" : "alert"} className={`pointer-events-auto flex max-w-lg items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-xl ${success ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-rose-200 bg-rose-50 text-rose-900"}`}>
+      <span className="flex-1">{toast.message}</span>
+      <button type="button" onClick={dismiss} aria-label="Dismiss notification" className="rounded-md px-1 font-bold opacity-70 hover:opacity-100">×</button>
+    </div>
+  </div>;
 }
 
 function ProductEditor({ categories, product, saving, onSubmit, onCancel }: { categories: Category[]; product?: SellerProduct; saving: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onCancel?: () => void }) {
@@ -138,6 +165,7 @@ function ProductEditor({ categories, product, saving, onSubmit, onCancel }: { ca
   const assignedMainCategory = assignedCategory?.parent_id ? categories.find((category) => category.id === assignedCategory.parent_id) : assignedCategory;
   const [selectedMainCategory, setSelectedMainCategory] = useState(assignedMainCategory?.slug ?? "");
   const [selectedSubcategory, setSelectedSubcategory] = useState(assignedCategory?.parent_id ? assignedCategory.slug : "");
+  const [imageUrls, setImageUrls] = useState("");
   const mainCategories = rootCategories(categories);
   const selectedMain = mainCategories.find((category) => category.slug === selectedMainCategory);
   const subcategories = selectedMain ? categoryChildren(categories, selectedMain.id) : [];
@@ -167,7 +195,7 @@ function ProductEditor({ categories, product, saving, onSubmit, onCancel }: { ca
     </div>
 
     <div className="space-y-5">
-      <section className="rounded-2xl border border-[#ede3df] bg-white p-5"><div className="flex items-center gap-2"><ImagePlus size={19} className="text-[#b65f5b]" /><h2 className="text-lg font-bold">Product gallery</h2></div><input name="images" type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif" className="mt-4 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[#fbf3f1] file:px-4 file:py-3 file:font-semibold file:text-[#9b5a57]" /><p className="mt-2 text-xs leading-5 text-[#817477]">Upload up to 6 images at a time. JPEG, PNG, WebP, or AVIF; 10 MB each.</p>{product && <label className="mt-4 flex items-start gap-3 rounded-xl bg-[#fff7f5] p-3 text-xs"><input name="replaceImages" type="checkbox" className="mt-0.5 h-4 w-4 accent-[#bf6d68]" /><span><strong className="block">Replace current gallery</strong>Leave unchecked to add the new images to the existing gallery.</span></label>}</section>
+      <section className="rounded-2xl border border-[#ede3df] bg-white p-5"><div className="flex items-center gap-2"><ImagePlus size={19} className="text-[#b65f5b]" /><h2 className="text-lg font-bold">Product gallery</h2></div><label className="mt-4 block text-sm font-semibold">Upload image files<input name="images" type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif" className="mt-2 block w-full font-normal text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[#fbf3f1] file:px-4 file:py-3 file:font-semibold file:text-[#9b5a57]" /></label><p className="mt-2 text-xs leading-5 text-[#817477]">JPEG, PNG, WebP, or AVIF; up to 10 MB each.</p><label className="mt-5 block text-sm font-semibold">Or add image URLs<textarea name="imageUrls" rows={3} value={imageUrls} onChange={(event) => setImageUrls(event.target.value)} placeholder={'https://example.com/product-image.jpg\nhttps://example.com/another-image.jpg'} className={textareaClass} /><span className="mt-1 block text-xs font-normal leading-5 text-[#817477]">Paste one HTTPS image link per line. You can combine URLs and uploads, up to 6 images total.</span></label>{imageUrls.split(/\r?\n/).map((url) => url.trim()).filter((url) => /^https:\/\//i.test(url)).slice(0, 6).length > 0 && <div className="mt-3 flex flex-wrap gap-2">{imageUrls.split(/\r?\n/).map((url) => url.trim()).filter((url) => /^https:\/\//i.test(url)).slice(0, 6).map((url, index) => <div key={`${url}-${index}`} className="relative h-14 w-14 overflow-hidden rounded-lg bg-[#fbf3f1]"><Image src={url} alt={`Product image URL preview ${index + 1}`} fill sizes="56px" unoptimized className="object-cover" /></div>)}</div>}{product && <label className="mt-4 flex items-start gap-3 rounded-xl bg-[#fff7f5] p-3 text-xs"><input name="replaceImages" type="checkbox" className="mt-0.5 h-4 w-4 accent-[#bf6d68]" /><span><strong className="block">Replace current gallery</strong>Leave unchecked to add the new images to the existing gallery.</span></label>}</section>
       {!product && <section className="rounded-2xl border border-[#ede3df] bg-white p-5"><label className="flex items-center gap-3 text-sm font-semibold"><input name="submitForReview" type="checkbox" defaultChecked className="h-5 w-5 accent-[#bf6d68]" />Submit for marketplace review</label><p className="mt-2 text-xs leading-5 text-[#817477]">Submitted listings are reviewed before shoppers can see them. Unchecked saves a draft.</p></section>}
       <section className="rounded-2xl border border-[#ede3df] bg-white p-5"><button disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#bf6d68] py-3 font-bold text-white disabled:opacity-50"><Save size={18} /> {saving ? "Saving…" : product ? "Save product changes" : "Save product"}</button>{onCancel ? <button type="button" onClick={onCancel} className="mt-3 w-full rounded-xl border border-[#d9c2bd] py-3 text-sm font-bold text-[#9b5a57]">Cancel editing</button> : <Link href="/dashboard/products" className="mt-3 block text-center text-sm font-semibold text-[#9b5a57]">Back to products</Link>}</section>
     </div>
@@ -179,8 +207,4 @@ const textareaClass = "mt-2 w-full rounded-xl border border-[#ddd3d0] bg-[#fcfaf
 
 function Field({ label, name, wide = false, value, onChange, ...inputProps }: { label: string; name: string; wide?: boolean; value?: string; onChange?: (value: string) => void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "name" | "value" | "onChange">) {
   return <label className={`text-sm font-semibold ${wide ? "sm:col-span-2" : ""}`}>{label}<input name={name} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} className={inputClass} {...inputProps} /></label>;
-}
-
-function Feedback({ error, message }: { error: string; message: string }) {
-  return <>{error && <p role="alert" className="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}{message && <p role="status" className="mt-5 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{message}</p>}</>;
 }

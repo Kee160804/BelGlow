@@ -8,6 +8,7 @@ import { FormEvent, ReactNode, createContext, useContext, useEffect, useMemo, us
 import { Heart, Mail, Minus, ShoppingBag, Sparkles, Store, UserRound, X } from "lucide-react";
 import { type StoreProduct } from "@/lib/catalog";
 import { createClient, hasSupabaseConfig } from "@/utils/supabase/client";
+import { isExternalProductImage } from "@/lib/product-image-url";
 
 const ProductPreviewModal = dynamic(() => import("@/components/products/ProductPreviewModal"));
 
@@ -190,7 +191,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (active && Array.isArray(fastCatalog)) {
         const optimizedProducts = (fastCatalog as CatalogPayload[]).map((product) => {
           const variants = product.variants.map((variant) => ({ id: variant.id, name: variant.name, price: Number(variant.priceCents) / 100, stock: Number(variant.stock) }));
-          const imageUrls = product.images.map((path) => supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl);
+          const imageUrls = product.images.map((path) => isExternalProductImage(path) ? path : supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl);
           const firstVariant = variants[0];
           return {
             id: product.id, slug: product.slug, name: product.name, category: product.category,
@@ -257,7 +258,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const reviewScores = ratings.get(row.id) ?? [];
         const averageRating = reviewScores.length ? reviewScores.reduce((total, rating) => total + rating, 0) / reviewScores.length : null;
         const productImages = [...(imagesByProduct.get(row.id) ?? [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
-        const imageUrls = productImages.map((image) => supabase.storage.from("product-images").getPublicUrl(image.storage_path).data.publicUrl);
+        const imageUrls = productImages.map((image) => isExternalProductImage(image.storage_path) ? image.storage_path : supabase.storage.from("product-images").getPublicUrl(image.storage_path).data.publicUrl);
         const imageUrl = imageUrls[0];
         return {
           id: row.id,
