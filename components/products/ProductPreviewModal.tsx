@@ -13,7 +13,7 @@ type Props = {
   product: StoreProduct;
   favorite: boolean;
   onClose: () => void;
-  onAdd: (id: string, variantId?: string) => void;
+  onAdd: (id: string, variantId?: string) => boolean;
   onFavorite: (id: string) => void;
 };
 
@@ -48,11 +48,15 @@ export default function ProductPreviewModal({ product, onClose, onAdd, onFavorit
   }, [onClose, zoomed]);
 
   function addSelectedQuantity() {
-    for (let index = 0; index < quantity; index += 1) onAdd(product.id, selectedOption?.id || product.variantId);
+    if (quantity > availableStock) return false;
+    for (let index = 0; index < quantity; index += 1) {
+      if (!onAdd(product.id, selectedOption?.id || product.variantId)) return false;
+    }
+    return true;
   }
 
   function buyNow() {
-    addSelectedQuantity();
+    if (!addSelectedQuantity()) return;
     onClose();
     router.push("/checkout");
   }

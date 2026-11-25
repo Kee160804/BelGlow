@@ -41,6 +41,10 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in or create a customer account before placing an order." }, { status: 401 });
+  }
   const allowed = await allowPublicRequest(request, "checkout", String(body.email), 12, 3600);
   if (!allowed) return NextResponse.json({ error: "Too many checkout attempts. Please wait before trying again." }, { status: 429 });
 

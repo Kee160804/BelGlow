@@ -48,7 +48,7 @@ type StoreContextValue = {
   recommendations: ReadonlyArray<StoreProduct>;
   userName: string | null;
   userRole: AccountRole | null;
-  addToCart: (id: string, variantId?: string) => void;
+  addToCart: (id: string, variantId?: string) => boolean;
   toggleFavorite: (id: string) => void;
   toggleSavedStore: (id: string) => void;
   openProduct: (id: string) => void;
@@ -215,7 +215,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Compatibility path for deployments where the catalog RPC migration
       // has not been applied yet.
       const { data: rows, error } = await supabase.from("products")
-        .select("id, seller_store_id, slug, name, short_description, description, ingredients, usage_instructions, attributes, base_price_cents, compare_at_price_cents")
+        .select("id, seller_store_id, review_status, slug, name, short_description, description, ingredients, usage_instructions, attributes, base_price_cents, compare_at_price_cents")
         .eq("status", "active")
         .order("created_at", { ascending: false });
       if (error || !active) return;
@@ -224,15 +224,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const ids = rows.map((row) => row.id);
       const storeIds = [...new Set(rows.map((row) => row.seller_store_id).filter((id): id is string => Boolean(id)))];
-      const [categoriesResult, linksResult, variantsResult, imagesResult, reviewsResult, storesResult] = await Promise.all([
+      const { data: storeRows } = storeIds.length
+        ? await supabase.from("seller_stores").select("id, name, slug, status").in("id", storeIds).eq("status", "approved")
+        : { data: [] };
+      const approvedStoreIds = new Set((storeRows ?? []).map((store) => store.id));
+      const visibleRows = rows.filter((row) => !row.seller_store_id || (row.review_status === "approved" && approvedStoreIds.has(row.seller_store_id)));
+      if (!visibleRows.length) {
+        setCatalogProducts([]);
+        return;
+      }
+      const ids = visibleRows.map((row) => row.id);
+      const [categoriesResult, linksResult, variantsResult, imagesResult, reviewsResult] = await Promise.all([
         supabase.from("categories").select("id, name").eq("is_active", true),
         supabase.from("product_categories").select("product_id, category_id").in("product_id", ids).eq("is_primary", true),
         supabase.from("product_variants").select("id, product_id, name, price_cents").in("product_id", ids).eq("is_active", true).order("sort_order"),
         supabase.from("product_images").select("product_id, storage_path, is_primary, sort_order").in("product_id", ids).order("sort_order"),
         supabase.from("reviews").select("product_id, rating").in("product_id", ids).eq("is_approved", true),
-        storeIds.length ? supabase.from("seller_stores").select("id, name, slug").in("id", storeIds) : Promise.resolve({ data: [] }),
       ]);
       if (!active) return;
 
@@ -249,10 +257,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       for (const image of imagesResult.data ?? []) imagesByProduct.set(image.product_id, [...(imagesByProduct.get(image.product_id) ?? []), image]);
       const ratings = new Map<string, number[]>();
       for (const review of reviewsResult.data ?? []) ratings.set(review.product_id, [...(ratings.get(review.product_id) ?? []), review.rating]);
-      const storeNames = new Map((storesResult.data ?? []).map((store) => [store.id, store.name]));
-      const storeSlugs = new Map((storesResult.data ?? []).map((store) => [store.id, store.slug]));
+      const storeNames = new Map((storeRows ?? []).map((store) => [store.id, store.name]));
+      const storeSlugs = new Map((storeRows ?? []).map((store) => [store.id, store.slug]));
 
-      const liveProducts = rows.map((row) => {
+      const liveProducts = visibleRows.map((row) => {
         const productVariants = variantsByProduct.get(row.id) ?? [];
         const variant = productVariants[0];
         const reviewScores = ratings.get(row.id) ?? [];
@@ -445,14 +453,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }
 
   function toggleFavorite(id: string) {
+    if (!currentUser) {
+      setAuthOpen(true);
+      showNotice("Sign in or create a customer account to save products.");
+      return;
+    }
     const shouldSave = !favoriteIds.includes(id);
     const nextFavorites = shouldSave ? [...favoriteIds, id] : favoriteIds.filter((item) => item !== id);
     setFavoriteIds(nextFavorites);
-    if (!currentUser) {
-      guestFavoritesRef.current = nextFavorites;
-      if (shouldSave) showNotice("Saved for this visit. Sign in to keep it for later.");
-    }
-    else if (isDatabaseId(id)) void persistWishlistChange(id, shouldSave);
+    if (isDatabaseId(id)) void persistWishlistChange(id, shouldSave);
     recordProductInteraction(id, shouldSave ? "favorite" : "unfavorite", shouldSave ? 4 : -4);
   }
 
@@ -491,22 +500,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (result.error) showNotice("We couldnâ€™t update your saved products. Please try again.");
   }
 
-  function addToCart(id: string, variantId?: string) {
+  function addToCart(id: string, variantId?: string): boolean {
     const product = catalogProducts.find((item) => item.id === id);
     const option = product?.variants?.find((variant) => variant.id === variantId) ?? product?.variants?.[0];
+    if (!currentUser) {
+      setAuthOpen(true);
+      showNotice("Sign in or create a customer account to add products to your bag.");
+      return false;
+    }
+    if (!product || !option || option.stock < 1) {
+      showNotice("This product is currently out of stock.");
+      return false;
+    }
     const cartItem: StoreCartItem = { productId: id, variantId: variantId ?? option?.id ?? product?.variantId, optionName: option?.name, price: option?.price ?? product?.price };
     setCart((current) => {
       const nextCart = [...current, cartItem];
-      if (!currentUser) guestCartRef.current = nextCart;
       return nextCart;
     });
-    if (currentUser && cartItem.variantId) {
+    if (cartItem.variantId) {
       void createClient().rpc("add_cart_item", { target_variant_id: cartItem.variantId, quantity_delta: 1 }).then(({ error }) => {
         if (error) showNotice(error.message);
       });
     }
     recordProductInteraction(id, "add_to_cart", 3);
     showNotice("Added to your glow bag");
+    return true;
   }
 
   function removeFromCart(item: StoreCartItem) {
@@ -549,8 +567,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value: StoreContextValue = {
     cart, favoriteIds, savedStoreIds, products: catalogProducts, recommendations, userName, userRole, addToCart, toggleFavorite, toggleSavedStore,
     openProduct, trackProduct,
-    openCart: () => { if (!shouldLoadShoppingData) router.push("/shop"); setWishlistOpen(false); setCartOpen(true); },
-    openWishlist: () => { if (!shouldLoadShoppingData) router.push("/shop"); setCartOpen(false); setWishlistOpen(true); },
+    openCart: () => { if (!currentUser) { setAuthOpen(true); showNotice("Sign in or create a customer account to view your bag."); return; } if (!shouldLoadShoppingData) router.push("/shop"); setWishlistOpen(false); setCartOpen(true); },
+    openWishlist: () => { if (!currentUser) { setAuthOpen(true); showNotice("Sign in or create a customer account to view saved products."); return; } if (!shouldLoadShoppingData) router.push("/shop"); setCartOpen(false); setWishlistOpen(true); },
     openAuth: () => { setAuthError(""); setAuthOpen(true); },
     completeCheckout,
     signOut,

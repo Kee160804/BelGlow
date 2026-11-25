@@ -26,6 +26,7 @@ export default function SellerCommissionCenter() {
   const [method, setMethod] = useState<PaymentMethod>("card");
   const [connecting, setConnecting] = useState(false);
   const [gatewayMessage, setGatewayMessage] = useState("");
+  const [returnNotice, setReturnNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -46,6 +47,20 @@ export default function SellerCommissionCenter() {
   }, []);
 
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const status = url.searchParams.get("commission_payment");
+    if (!status) return;
+    const notice = status === "paid"
+      ? "Belize Bank confirmed your commission payment. Your balance has been updated."
+      : status === "failed"
+        ? "The bank did not complete the payment. Your commission balance is still due."
+        : "The payment is still being verified by Belize Bank. Refresh this page in a moment.";
+    url.searchParams.delete("commission_payment");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    const timer = window.setTimeout(() => { setReturnNotice(notice); void load(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
   useEffect(() => {
     if (!paymentOpen) return;
     const previousOverflow = document.body.style.overflow;
@@ -68,7 +83,7 @@ export default function SellerCommissionCenter() {
     if (method === "digiwallet") return;
     setConnecting(true); setGatewayMessage("");
     try {
-      const response = await fetch("/api/seller/commission-payment", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedAmountCents: balance }) });
+      const response = await fetch("/api/seller/commission-payment", { method: "POST" });
       const result = await response.json() as { error?: string; redirectUrl?: string };
       if (!response.ok || !result.redirectUrl) throw new Error(result.error || "The Belize Bank gateway is not configured yet.");
       window.location.assign(result.redirectUrl);
@@ -82,6 +97,7 @@ export default function SellerCommissionCenter() {
 
   return <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
     <div className="space-y-5">
+      {returnNotice && <p role="status" className={`rounded-xl px-4 py-3 text-sm ${returnNotice.startsWith("Belize Bank confirmed") ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{returnNotice}</p>}
       {error && <p role="alert" className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric icon={<WalletCards size={20} />} label="Current balance" value={money(balance)} detail={`From ${sales.length} completed ${sales.length === 1 ? "sale" : "sales"}`} />

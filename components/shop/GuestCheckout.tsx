@@ -11,7 +11,7 @@ type SavedAddress = { id: string; label: string; recipient_name: string; phone: 
 type SellerOption = { id: string; name: string; offers_delivery: boolean; offers_pickup: boolean; delivery_fee_cents: number | null; pickup_address: string | null };
 
 export default function GuestCheckout() {
-  const { cart, products, userName, completeCheckout } = useStore();
+  const { cart, products, userName, completeCheckout, openAuth } = useStore();
   const [step, setStep] = useState(1);
   const [fulfillmentMethod, setFulfillmentMethod] = useState<"delivery" | "pickup">("delivery");
   const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "pay_on_delivery" | "pay_on_pickup">("bank_transfer");
@@ -143,6 +143,7 @@ export default function GuestCheckout() {
     </div>
     {confirmation.paymentDetails && <div className="mt-4"><PaymentCenter initialOrder={confirmation.paymentDetails} initialEmail={confirmation.email} /></div>}
   </section>;
+  if (lines.length > 0 && !userName) return <section className="mt-6 rounded-2xl bg-[#fff5f7] p-6 text-center text-sm text-[#75696e]"><h2 className="text-lg font-black text-[#292527]">Create an account to purchase</h2><p className="mt-2">Products are public to browse. Sign in or create a customer account to place your order.</p><button type="button" onClick={openAuth} className="mt-4 rounded-xl bg-[#ef4b74] px-5 py-3 font-bold text-white">Sign in or create account</button></section>;
   if (!lines.length) return <section className="mt-6 rounded-2xl bg-[#fff5f7] p-6 text-center text-sm text-[#75696e]">Your bag is empty.<Link href="/shop" className="ml-2 font-bold text-[#df3765] underline">Browse products</Link></section>;
 
   return <form ref={formRef} onSubmit={placeOrder} className="mt-3 flex min-h-[500px] flex-col rounded-[22px] border border-[#f0dce2] bg-white p-4 shadow-[0_18px_55px_rgba(107,44,62,.10)] sm:p-5">
