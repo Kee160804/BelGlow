@@ -10,15 +10,16 @@ import DashboardSwitcher, { type DashboardRole } from "@/components/dashboard/Da
 import { createClient } from "@/utils/supabase/client";
 
 type PaymentAttention = "rejected" | "under_review" | "awaiting_payment" | "confirmed" | "mixed";
-type CustomerOrder = { id: string; order_number: number; status: string; payment_status: string; fulfillment_status: string; total_cents: number; placed_at: string; payments?: { provider: string }[] | null; payment_attention?: PaymentAttention | null };
+type CustomerOrder = { id: string; order_number: number; status: string; payment_status: string; fulfillment_status: string; cancellation_reason: string | null; subtotal_cents: number; discount_cents: number; shipping_cents: number; tax_cents: number; total_cents: number; currency: string; shipping_method_name: string | null; placed_at: string; payments?: { provider: string }[] | null; refunds?: { status: string; amount_cents: number }[] | null; payment_attention?: PaymentAttention | null; business_names: string[] };
 type CustomerAddress = { id: string; label: string; recipient_name: string; phone: string | null; address_line_1: string; address_line_2: string | null; city: string; district: string | null; postal_code: string | null; delivery_notes: string | null; is_default: boolean };
-type OrderItem = { id: string; product_id: string | null; product_name: string; variant_name: string | null; quantity: number; unit_price_cents: number };
-type Shipment = { id: string; carrier: string | null; tracking_number: string | null; tracking_url: string | null; status: string; shipped_at: string | null; delivered_at: string | null };
+type OrderItem = { id: string; product_id: string | null; product_name: string; variant_name: string | null; quantity: number; unit_price_cents: number; seller_store_id: string | null; seller_stores: { name: string } | { name: string }[] | null };
+type Shipment = { id: string; carrier: string | null; tracking_number: string | null; tracking_url: string | null; status: string; shipped_at: string | null; delivered_at: string | null; seller_stores: { name: string } | { name: string }[] | null };
 
 export default function CustomerDashboard({ name, email, phone, role, orders, addresses, initialOrderNumber }: { name: string; email: string; phone: string; role: DashboardRole; orders: CustomerOrder[]; addresses: CustomerAddress[]; initialOrderNumber?: number }) {
   const { favoriteIds, savedStoreIds, products, openWishlist, signOut } = useStore();
   const [profileName, setProfileName] = useState(name);
   const [profilePhone, setProfilePhone] = useState(phone);
+  const [customerOrders, setCustomerOrders] = useState(orders);
   const [savedAddresses, setSavedAddresses] = useState(addresses);
   const [addressOpen, setAddressOpen] = useState(false);
   const [editingAddress, setEditingAddress] = useState<CustomerAddress | null>(null);
@@ -30,7 +31,10 @@ export default function CustomerDashboard({ name, email, phone, role, orders, ad
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const firstName = profileName.trim().split(/\s+/)[0] || "there";
-  const selectedOrder = orders.find((order) => order.id === expandedOrder) ?? null;
+  const selectedOrder = customerOrders.find((order) => order.id === expandedOrder) ?? null;
+  const isClosedOrder = (order: CustomerOrder) => ["completed", "cancelled", "refunded"].includes(order.status) || ["delivered", "cancelled", "returned"].includes(order.fulfillment_status);
+  const activeOrders = customerOrders.filter((order) => !isClosedOrder(order));
+  const purchaseHistory = customerOrders.filter(isClosedOrder);
 
   useEffect(() => {
     if (!expandedOrder || orderItems[expandedOrder]) return;
@@ -38,8 +42,8 @@ export default function CustomerDashboard({ name, email, phone, role, orders, ad
     void (async () => {
       const supabase = createClient();
       const [itemResult, shipmentResult] = await Promise.all([
-        supabase.from("order_items").select("id, product_id, product_name, variant_name, quantity, unit_price_cents").eq("order_id", expandedOrder),
-        supabase.from("shipments").select("id, carrier, tracking_number, tracking_url, status, shipped_at, delivered_at").eq("order_id", expandedOrder).order("created_at", { ascending: false }),
+        supabase.from("order_items").select("id, product_id, product_name, variant_name, quantity, unit_price_cents, seller_store_id, seller_stores(name)").eq("order_id", expandedOrder),
+        supabase.from("shipments").select("id, carrier, tracking_number, tracking_url, status, shipped_at, delivered_at, seller_stores(name)").eq("order_id", expandedOrder).order("created_at", { ascending: false }),
       ]);
       if (!active) return;
       if (itemResult.error || shipmentResult.error) setError(itemResult.error?.message ?? shipmentResult.error?.message ?? "Unable to load order details.");
@@ -100,25 +104,56 @@ export default function CustomerDashboard({ name, email, phone, role, orders, ad
     setBusy(""); if (reviewError) setError(reviewError.message); else setNotice("Review submitted for approval. Thank you!");
   }
 
-  async function requestOrderAction(orderId: string, requestType: "cancel" | "return" | "refund") {
-    const reason = window.prompt(`Tell BelGlow why you want to request this ${requestType}:`); if (!reason?.trim()) return;
-    setBusy(orderId); const supabase = createClient(); const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setBusy(""); setError("Sign in again to send this request."); return; }
-    const { error: requestError } = await supabase.from("order_requests").insert({ order_id: orderId, user_id: user.id, request_type: requestType, reason: reason.trim() });
-    setBusy(""); if (requestError) setError(requestError.message); else setNotice(`${requestType.charAt(0).toUpperCase() + requestType.slice(1)} request sent to BelGlow for review with the seller.`);
-  }
-
-  async function requestCancellation(orderId: string) {
-    await requestOrderAction(orderId, "cancel");
+  async function cancelOrder(order: CustomerOrder) {
+    const paid = ["paid", "partially_refunded"].includes(order.payment_status);
+    const confirmation = `Cancel order #${order.order_number}?${paid ? " A refund will be recorded as pending and processed by BelGlow." : ""}`;
+    if (!window.confirm(confirmation)) return;
+    setBusy(order.id); setError(""); setNotice("");
+    const { data, error: cancelError } = await createClient().rpc("cancel_customer_order", { target_order_id: order.id, cancellation_note: "Cancelled by customer" });
+    setBusy("");
+    if (cancelError) { setError(cancelError.message); return; }
+    const result = data as { refundPending?: boolean; refundAmountCents?: number } | null;
+    const refundPending = result?.refundPending === true;
+    setCustomerOrders((current) => current.map((item) => item.id === order.id ? {
+      ...item,
+      status: "cancelled",
+      fulfillment_status: "cancelled",
+      refunds: refundPending
+        ? [...(item.refunds ?? []), { status: "pending", amount_cents: result?.refundAmountCents ?? item.total_cents }]
+        : item.refunds,
+    } : item));
+    setNotice(refundPending ? `Order #${order.order_number} was cancelled. Its refund is pending processing.` : `Order #${order.order_number} was cancelled.`);
   }
 
   return <main className="min-h-screen bg-[#fbf6f4]">
     <SiteHeader />
     <section className="border-b border-[#eadfdb] bg-[radial-gradient(circle_at_top_left,#ffe8ee,transparent_45%),linear-gradient(135deg,#fffaf8,#f5e7e2)] px-5 py-10 sm:px-8 lg:px-16 lg:py-14"><div className="mx-auto flex max-w-7xl flex-col gap-6 sm:flex-row sm:items-end sm:justify-between"><div><DashboardSwitcher role={role} className="mb-6" /><p className="text-xs font-bold uppercase tracking-[.22em] text-[#d8446e]">My BelGlow account</p><h1 className="mt-3 font-serif text-4xl font-semibold tracking-[-.03em] sm:text-5xl">Welcome, {firstName}</h1><p className="mt-3 text-sm text-[#75696b]">Track orders, revisit saved beauty finds, and manage your account.</p></div><button onClick={() => void signOut()} className="inline-flex w-fit items-center gap-2 rounded-full border border-[#d9c7c3] bg-white px-5 py-3 text-sm font-bold text-[#8f514f] shadow-sm"><LogOut size={17} /> Sign out</button></div></section>
     <div className="mx-auto grid max-w-7xl gap-6 px-5 py-8 sm:px-8 lg:grid-cols-[1fr_340px] lg:px-16 lg:py-10"><div className="space-y-6">{error && <p role="alert" className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}{notice && <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</p>}
-      <section className="grid gap-4 sm:grid-cols-3"><SummaryCard icon={<ShoppingBag size={20} />} label="Orders" value={String(orders.length)} detail="Placed with this account" /><SummaryCard icon={<Heart size={20} />} label="Saved items" value={String(favoriteIds.length)} detail="Ready to revisit" /><SummaryCard icon={<MapPin size={20} />} label="Addresses" value={String(savedAddresses.length)} detail="Saved delivery locations" /></section>
-      <section className="rounded-[24px] border border-[#eadfdb] bg-white p-5 shadow-sm sm:p-7"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#b55f5c]">Purchase history</p><h2 className="mt-1 text-xl font-bold">Recent orders</h2></div><Link href="/shop" className="inline-flex items-center gap-1 text-sm font-bold text-[#b05a58]">Continue shopping <ArrowRight size={16} /></Link></div>
-        {orders.length ? <div className="mt-5 divide-y divide-[#eee5e1]">{orders.map((order) => <article key={order.id} className="py-4"><button onClick={() => void toggleOrder(order.id)} className="group flex w-full flex-col gap-3 rounded-xl p-2 text-left transition hover:bg-[#fff8fa] sm:flex-row sm:items-center"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#fff1f3] text-[#d8446e]"><PackageCheck size={21} /></span><span className="min-w-0 flex-1"><span className="block font-bold">Order #{order.order_number}</span><span className="mt-1 block text-xs capitalize text-[#817679]">{new Date(order.placed_at).toLocaleDateString()} · {order.fulfillment_status.replaceAll("_", " ")}</span></span><span className="sm:text-right"><span className="block font-bold">BZ${(order.total_cents / 100).toFixed(2)}</span><CustomerPaymentStatus attention={paymentAttention[order.id]} paymentStatus={order.payment_status} orderStatus={order.status} /></span><span className="inline-flex items-center gap-1 text-xs font-bold text-[#b05a58] sm:ml-2">View details <ArrowRight size={14} className="transition group-hover:translate-x-0.5" /></span></button></article>)}</div> : <div className="mt-5 rounded-2xl bg-[#fbf6f4] p-7 text-center"><ShoppingBag className="mx-auto text-[#d98a86]" /><p className="mt-3 font-bold">No orders yet</p><p className="mt-1 text-sm text-[#756a6d]">Your BelGlow purchases will appear here.</p><Link href="/shop" className="mt-4 inline-flex rounded-full bg-[#ef4b74] px-5 py-2.5 text-sm font-bold text-white">Explore the shop</Link></div>}
+      <section className="grid gap-4 sm:grid-cols-3"><SummaryCard icon={<ShoppingBag size={20} />} label="Orders" value={String(activeOrders.length)} detail="Currently in progress" /><SummaryCard icon={<Heart size={20} />} label="Saved items" value={String(favoriteIds.length)} detail="Ready to revisit" /><SummaryCard icon={<MapPin size={20} />} label="Addresses" value={String(savedAddresses.length)} detail="Saved delivery locations" /></section>
+      <section className="rounded-[24px] border border-[#eadfdb] bg-white p-5 shadow-sm sm:p-7">
+        <div className="flex items-center justify-between gap-4">
+          <div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#b55f5c]">Orders</p><h2 className="mt-1 text-xl font-bold">Track your orders</h2><p className="mt-1 text-sm text-[#817679]">See each business, order total, and fulfillment status.</p></div>
+          <Link href="/shop" className="inline-flex items-center gap-1 text-sm font-bold text-[#b05a58]">Continue shopping <ArrowRight size={16} /></Link>
+        </div>
+        {activeOrders.length ? <div className="mt-5 divide-y divide-[#eee5e1]">{activeOrders.map((order) => <article key={order.id} className="py-4">
+          <button onClick={() => void toggleOrder(order.id)} className="group flex w-full flex-col gap-3 rounded-xl p-2 text-left transition hover:bg-[#fff8fa] sm:flex-row sm:items-center">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#fff1f3] text-[#d8446e]"><PackageCheck size={21} /></span>
+            <span className="min-w-0 flex-1"><span className="block font-bold">Order #{order.order_number}</span><span className="mt-1 block text-xs text-[#817679]">{order.business_names.length ? order.business_names.join(", ") : "BelGlow business"}</span><span className="mt-1 block text-xs capitalize text-[#817679]">{new Date(order.placed_at).toLocaleDateString()} | {order.cancellation_reason ? "cancelled" : order.fulfillment_status.replaceAll("_", " ")}</span></span>
+            <span className="sm:text-right"><span className="block font-bold">BZ${(order.total_cents / 100).toFixed(2)}</span><CustomerPaymentStatus attention={paymentAttention[order.id]} paymentStatus={order.payment_status} orderStatus={order.status} /></span>
+            <span className="inline-flex items-center gap-1 text-xs font-bold text-[#b05a58] sm:ml-2">Track order <ArrowRight size={14} className="transition group-hover:translate-x-0.5" /></span>
+          </button>
+        </article>)}</div> : <div className="mt-5 rounded-2xl bg-[#fbf6f4] p-7 text-center"><ShoppingBag className="mx-auto text-[#d98a86]" /><p className="mt-3 font-bold">No active orders</p><p className="mt-1 text-sm text-[#756a6d]">New orders will appear here while the business prepares them.</p><Link href="/shop" className="mt-4 inline-flex rounded-full bg-[#ef4b74] px-5 py-2.5 text-sm font-bold text-white">Explore the shop</Link></div>}
+      </section>
+      <section className="rounded-[24px] border border-[#eadfdb] bg-white p-5 shadow-sm sm:p-7">
+        <div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#b55f5c]">Purchase history</p><h2 className="mt-1 text-xl font-bold">Completed and cancelled orders</h2></div>
+        {purchaseHistory.length ? <div className="mt-5 divide-y divide-[#eee5e1]">{purchaseHistory.map((order) => <article key={order.id} className="py-4">
+          <button onClick={() => void toggleOrder(order.id)} className="group flex w-full flex-col gap-3 rounded-xl p-2 text-left transition hover:bg-[#fff8fa] sm:flex-row sm:items-center">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#fff1f3] text-[#d8446e]"><PackageCheck size={21} /></span>
+            <span className="min-w-0 flex-1"><span className="block font-bold">Order #{order.order_number}</span><span className="mt-1 block text-xs text-[#817679]">{order.business_names.length ? order.business_names.join(", ") : "BelGlow business"}</span><span className="mt-1 block text-xs capitalize text-[#817679]">{new Date(order.placed_at).toLocaleDateString()} | {order.cancellation_reason ? "cancelled" : order.fulfillment_status.replaceAll("_", " ")}</span></span>
+            <span className="sm:text-right"><span className="block font-bold">BZ${(order.total_cents / 100).toFixed(2)}</span><CustomerPaymentStatus attention={paymentAttention[order.id]} paymentStatus={order.payment_status} orderStatus={order.status} /></span>
+            <span className="inline-flex items-center gap-1 text-xs font-bold text-[#b05a58] sm:ml-2">View details <ArrowRight size={14} className="transition group-hover:translate-x-0.5" /></span>
+          </button>
+        </article>)}</div> : <p className="mt-5 rounded-2xl bg-[#fbf6f4] p-7 text-center text-sm text-[#756a6d]">Completed or cancelled orders will appear here.</p>}
       </section></div>
       <aside className="space-y-6"><section className="rounded-[24px] border border-[#eadfdb] bg-white p-6 shadow-sm"><span className="grid h-12 w-12 place-items-center rounded-full bg-[#282326] font-serif text-xl text-white">{profileName.charAt(0).toUpperCase()}</span><h2 className="mt-4 text-lg font-bold">{profileName}</h2><p className="mt-1 break-all text-sm text-[#756a6d]">{email}</p><div className="mt-5 border-t border-[#eee5e1] pt-5"><p className="flex items-center gap-2 text-sm font-semibold"><UserRound size={17} className="text-[#b55f5c]" /> Customer account</p></div><form onSubmit={saveProfile} className="mt-4 space-y-3"><label className="block text-xs font-bold">Full name<input value={profileName} onChange={(event) => setProfileName(event.target.value)} required className="mt-1 h-10 w-full rounded-lg border border-[#eadfdb] px-3 font-normal" /></label><label className="block text-xs font-bold">Phone<input value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[#eadfdb] px-3 font-normal" /></label><button disabled={busy === "profile"} className="w-full rounded-xl bg-[#282326] py-2.5 text-xs font-bold text-white disabled:opacity-50">Save account details</button></form></section>
         <section className="rounded-[24px] border border-[#eadfdb] bg-white p-6 shadow-sm"><h2 className="font-bold">Quick actions</h2><button onClick={openWishlist} className="mt-4 flex w-full items-center justify-between rounded-xl bg-[#fff5f6] px-4 py-3 text-left text-sm font-bold text-[#9b514f]"><span className="flex items-center gap-2"><Heart size={17} /> View saved items</span><ArrowRight size={16} /></button>{savedStoreIds.length > 0 && <div className="mt-3 rounded-xl border border-[#eadfdb] p-3"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#817679]">Favorite businesses</p>{savedStoreIds.map((storeId) => { const product = products.find((item) => item.sellerStoreId === storeId); return product?.sellerSlug ? <Link key={storeId} href={`/store/${product.sellerSlug}`} className="mt-2 flex items-center justify-between text-sm font-bold text-[#9b514f]"><span>{product.sellerName}</span><ArrowRight size={15} /></Link> : null; })}</div>}<Link href="/seller-application" className="mt-3 flex items-center justify-between rounded-xl border border-[#eadfdb] px-4 py-3 text-sm font-bold text-[#5f5557]"><span>Apply to sell</span><ArrowRight size={16} /></Link></section>
@@ -133,9 +168,11 @@ export default function CustomerDashboard({ name, email, phone, role, orders, ad
         <div className="min-h-0 flex-1 touch-pan-y space-y-4 overflow-y-auto overscroll-contain p-4 sm:p-6">
           <section className="rounded-2xl border border-[#eadfdb] bg-white p-5">
             <div className="flex items-center justify-between gap-4"><h3 className="font-bold">Order items</h3><strong className="text-lg">BZ${(selectedOrder.total_cents / 100).toFixed(2)}</strong></div>
-            {orderItems[selectedOrder.id] ? <div className="mt-3 divide-y divide-[#eadfdb]">{orderItems[selectedOrder.id].map((item) => <div key={item.id} className="flex items-center justify-between gap-4 py-3 text-sm"><span>{item.product_name}{item.variant_name && item.variant_name !== "Default" ? ` · ${item.variant_name}` : ""} × {item.quantity}</span><span className="text-right"><strong>BZ${(item.unit_price_cents * item.quantity / 100).toFixed(2)}</strong>{selectedOrder.fulfillment_status === "delivered" && item.product_id && <button disabled={busy === item.id} onClick={() => void reviewProduct(item)} className="mt-1 block text-xs font-bold text-[#b05a58] underline">Write review</button>}</span></div>)}</div> : <p className="mt-3 text-sm text-[#817679]">Loading order items…</p>}
-            {(shipments[selectedOrder.id] ?? []).map((shipment) => <div key={shipment.id} className="mt-3 rounded-xl bg-[#fbf6f4] p-3 text-xs"><p className="font-bold capitalize">Shipment: {shipment.status.replaceAll("_", " ")}</p><p className="mt-1 text-[#756a6d]">{shipment.carrier || "Delivery carrier"}{shipment.tracking_number ? ` · ${shipment.tracking_number}` : ""}</p>{shipment.tracking_url && <a href={shipment.tracking_url} target="_blank" rel="noreferrer" className="mt-2 inline-block font-bold text-[#b05a58] underline">Track shipment</a>}</div>)}
-            {["pending", "confirmed"].includes(selectedOrder.status) && <button disabled={busy === selectedOrder.id} onClick={() => void requestCancellation(selectedOrder.id)} className="mt-4 text-xs font-bold text-rose-700 underline">Request cancellation</button>}
+            {orderItems[selectedOrder.id] ? <div className="mt-3 divide-y divide-[#eadfdb]">{orderItems[selectedOrder.id].map((item) => { const store = Array.isArray(item.seller_stores) ? item.seller_stores[0] : item.seller_stores; return <div key={item.id} className="flex items-center justify-between gap-4 py-3 text-sm"><span><span className="block">{item.product_name}{item.variant_name && item.variant_name !== "Default" ? " / " + item.variant_name : ""} x {item.quantity}</span><span className="mt-1 block text-xs text-[#817679]">Sold by {store?.name ?? "BelGlow business"}</span></span><span className="text-right"><strong>BZ${(item.unit_price_cents * item.quantity / 100).toFixed(2)}</strong>{selectedOrder.fulfillment_status === "delivered" && item.product_id && <button disabled={busy === item.id} onClick={() => void reviewProduct(item)} className="mt-1 block text-xs font-bold text-[#b05a58] underline">Write review</button>}</span></div>; })}</div> : <p className="mt-3 text-sm text-[#817679]">Loading order items...</p>}
+            <dl className="mt-4 space-y-2 border-t border-[#eee5e1] pt-4 text-sm"><PriceRow label="Subtotal" cents={selectedOrder.subtotal_cents} /><PriceRow label="Discount" cents={-selectedOrder.discount_cents} /><PriceRow label="Shipping" cents={selectedOrder.shipping_cents} /><PriceRow label="Tax" cents={selectedOrder.tax_cents} /><PriceRow label="Order total" cents={selectedOrder.total_cents} strong /></dl>
+            {selectedOrder.fulfillment_status === "cancelled" || selectedOrder.cancellation_reason ? <p className="mt-4 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-800">This order was cancelled.{selectedOrder.refunds?.some((refund) => refund.status === "pending") ? " Refund pending processing." : selectedOrder.payment_status === "refunded" ? " Refund completed." : ""}</p> : <section className="mt-5 rounded-xl bg-[#fbf6f4] p-4"><h4 className="text-sm font-bold">Order progress</h4><ol className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">{["Received", "Confirmed", "Preparing", "On the way / ready", "Completed"].map((step, index) => { const current = selectedOrder.fulfillment_status === "delivered" ? 4 : selectedOrder.fulfillment_status === "shipped" ? 3 : selectedOrder.fulfillment_status === "processing" ? 2 : selectedOrder.status === "confirmed" ? 1 : 0; return <li key={step} className={"rounded-lg px-2 py-2 " + (index <= current ? "bg-emerald-100 font-bold text-emerald-800" : "bg-white text-[#817679]")}>{index + 1}. {step}</li>; })}</ol></section>}
+            {(shipments[selectedOrder.id] ?? []).map((shipment) => { const store = Array.isArray(shipment.seller_stores) ? shipment.seller_stores[0] : shipment.seller_stores; return <div key={shipment.id} className="mt-3 rounded-xl bg-[#fbf6f4] p-3 text-xs"><p className="font-bold capitalize">{store?.name ? `Shipment from ${store.name}` : "Shipment"}: {shipment.status.replaceAll("_", " ")}</p><p className="mt-1 text-[#756a6d]">{shipment.carrier || "Delivery carrier"}{shipment.tracking_number ? " / " + shipment.tracking_number : ""}</p>{shipment.tracking_url && <a href={shipment.tracking_url} target="_blank" rel="noreferrer" className="mt-2 inline-block font-bold text-[#b05a58] underline">Track shipment</a>}</div>; })}
+            {["pending", "confirmed", "processing"].includes(selectedOrder.status) && ["unfulfilled", "processing"].includes(selectedOrder.fulfillment_status) && <button disabled={busy === selectedOrder.id} onClick={() => void cancelOrder(selectedOrder)} className="mt-4 rounded-lg border border-rose-200 px-4 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">{busy === selectedOrder.id ? "Cancelling..." : "Cancel order"}</button>}
           </section>
           {selectedOrder.payments?.[0]?.provider === "bank_transfer" ? <section><div className="mb-3"><p className="text-xs font-bold uppercase tracking-[.16em] text-[#d8446e]">Payment</p><h3 className="mt-1 text-xl font-black">Bank transfer and receipt</h3><p className="mt-1 text-sm text-[#75696b]">Use the seller’s payment details and upload the matching receipt here.</p></div><PaymentCenter key={selectedOrder.id} initialOrderNumber={selectedOrder.order_number} initialEmail={email} onPaymentStatusChange={(status) => setPaymentAttention((current) => ({ ...current, [selectedOrder.id]: status }))} /></section> : <section className="rounded-2xl border border-[#eadfdb] bg-white p-5"><h3 className="font-bold">Payment method</h3><p className="mt-2 text-sm text-[#75696b]">{selectedOrder.payments?.[0]?.provider === "pay_on_delivery" ? "Payment is due when your order is delivered." : selectedOrder.payments?.[0]?.provider === "pay_on_pickup" ? "Payment is due when you collect your order." : "No bank-transfer receipt is required for this order."}</p></section>}
         </div>
@@ -146,6 +183,7 @@ export default function CustomerDashboard({ name, email, phone, role, orders, ad
 }
 
 function SummaryCard({ icon, label, value, detail }: { icon: React.ReactNode; label: string; value: string; detail: string }) { return <article className="rounded-[22px] border border-[#eadfdb] bg-white p-5 shadow-sm"><span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fff0f3] text-[#d8446e]">{icon}</span><p className="mt-4 text-xs font-bold uppercase tracking-[.14em] text-[#817679]">{label}</p><p className="mt-1 text-3xl font-black">{value}</p><p className="mt-1 text-xs text-[#817679]">{detail}</p></article>; }
+function PriceRow({ label, cents, strong = false }: { label: string; cents: number; strong?: boolean }) { return <div className={`flex items-center justify-between ${strong ? "border-t border-[#eee5e1] pt-2 font-bold" : "text-[#756a6d]"}`}><dt>{label}</dt><dd>{cents < 0 ? "-" : ""}BZ${(Math.abs(cents) / 100).toFixed(2)}</dd></div>; }
 function CustomerPaymentStatus({ attention, paymentStatus, orderStatus }: { attention?: PaymentAttention | null; paymentStatus: string; orderStatus: string }) {
   if (attention === "rejected") return <span className="mt-1 inline-flex rounded-full bg-rose-100 px-3 py-1 text-xs font-black text-rose-700">Payment rejected — action required</span>;
   if (attention === "under_review") return <span className="mt-1 inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-700">Receipt under review</span>;

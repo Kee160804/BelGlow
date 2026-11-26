@@ -54,10 +54,18 @@ export async function registerBelizeBankPayment(input: {
   returnUrl: string;
   callbackUrl: string;
 }) {
+  const returnUrl = input.returnUrl.trim();
+  if (!returnUrl) throw new Error("Belize Bank requires a return URL for commission payments.");
+  const parsedReturnUrl = new URL(returnUrl);
+  if (parsedReturnUrl.protocol !== "https:") throw new Error("The Belize Bank return URL must use HTTPS.");
+
   const result = await postGateway("register.do", {
     amount: input.amountCents,
     description: input.description,
-    returnURL: input.returnUrl,
+    // The integration guide names this returnURL. The gateway error response
+    // refers to returnUrl, so send both casings with the same validated URL.
+    returnURL: returnUrl,
+    returnUrl,
     orderNumber: input.reference,
     dynamicCallBackUrl: input.callbackUrl,
   });
