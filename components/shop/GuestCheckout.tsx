@@ -21,6 +21,7 @@ export default function GuestCheckout() {
   const [idempotencyKey] = useState(() => crypto.randomUUID());
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [sellerOptions, setSellerOptions] = useState<SellerOption[]>([]);
+  const [sellerOptionsLoaded, setSellerOptionsLoaded] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const prefilled = useRef(false);
 
@@ -79,11 +80,18 @@ export default function GuestCheckout() {
   useEffect(() => {
     if (!sellerIds.length) return;
     let active = true;
+    setSellerOptionsLoaded(false);
     void createClient().from("seller_stores").select("id, name, offers_delivery, offers_pickup, delivery_fee_cents, pickup_address").in("id", sellerIds).then(({ data }) => {
-      if (active) setSellerOptions((data ?? []) as SellerOption[]);
+      if (active) {
+        setSellerOptions((data ?? []) as SellerOption[]);
+        setSellerOptionsLoaded(true);
+      }
     });
     return () => { active = false; };
   }, [sellerIds]);
+
+  const pickupConfigured = sellerOptionsLoaded && sellerOptions.length === sellerIds.length && sellerOptions.length > 0
+    && sellerOptions.every((seller) => seller.offers_pickup && Boolean(seller.pickup_address?.trim()));
 
   function continueCheckout() {
     if (step === 1) {
@@ -153,7 +161,8 @@ export default function GuestCheckout() {
         <div className="flex items-center justify-between"><div><h2 className="text-lg font-black">Contact information</h2><p className="text-xs text-[#817679]">Where the seller can reach you.</p></div>{savedAddresses.length > 0 && <select aria-label="Use a saved address" defaultValue={savedAddresses[0]?.id} onChange={(event) => { const address = savedAddresses.find((item) => item.id === event.target.value); if (address) applyAddress(address); }} className="h-9 max-w-44 rounded-lg border border-[#e7dade] bg-white px-2 text-xs"><option value="">New address</option>{savedAddresses.map((address) => <option key={address.id} value={address.id}>{address.label}</option>)}</select>}</div>
         <div className="mt-3 grid gap-3 sm:grid-cols-3"><Field name="recipientName" label="Full name" autoComplete="name" placeholder="Your name" required /><Field name="email" label="Email address" type="email" autoComplete="email" placeholder="you@example.com" required /><Field name="phone" label="Phone number" type="tel" autoComplete="tel" placeholder="+501" /></div>
         <h3 className="mt-4 text-sm font-black">Receive your order</h3>
-        <div className="mt-2 grid grid-cols-2 gap-3"><ChoiceCard selected={fulfillmentMethod === "delivery"} icon={<Truck size={22} />} title="Delivery" detail="Delivered to your address" onSelect={() => { setFulfillmentMethod("delivery"); if (paymentMethod === "pay_on_pickup") setPaymentMethod("bank_transfer"); }} /><ChoiceCard selected={fulfillmentMethod === "pickup"} icon={<Store size={22} />} title="Store pickup" detail="Collect from each seller" onSelect={() => { setFulfillmentMethod("pickup"); if (paymentMethod === "pay_on_delivery") setPaymentMethod("bank_transfer"); }} /></div>
+        <div className="mt-2 grid grid-cols-2 gap-3"><ChoiceCard selected={fulfillmentMethod === "delivery"} icon={<Truck size={22} />} title="Delivery" detail="Delivered to your address" onSelect={() => { setFulfillmentMethod("delivery"); if (paymentMethod === "pay_on_pickup") setPaymentMethod("bank_transfer"); }} /><ChoiceCard selected={fulfillmentMethod === "pickup"} disabled={!pickupConfigured} icon={<Store size={22} />} title="Store pickup" detail={pickupConfigured ? "Collect from each seller" : sellerOptionsLoaded ? "Seller pickup setup required" : "Checking seller pickup…"} onSelect={() => { setFulfillmentMethod("pickup"); if (paymentMethod === "pay_on_delivery") setPaymentMethod("bank_transfer"); }} /></div>
+        {!pickupConfigured && sellerOptionsLoaded && <p className="mt-2 rounded-lg bg-[#fff5f7] p-3 text-xs leading-5 text-[#75696e]">Pickup isn’t available until each seller enables it and adds a pickup address. If this is your store, open <Link href="/dashboard/settings" target="_blank" rel="noreferrer" className="font-bold text-[#df3765] underline">seller settings</Link>, choose Delivery and pickup, enter the real pickup address, then save settings.</p>}
         <div className="mt-3 rounded-xl bg-[#fbf7f8] p-3">{fulfillmentMethod === "delivery" ? <><div className="flex items-center justify-between"><h3 className="text-sm font-black">Delivery address</h3>{deliveryFee > 0 && <span className="text-xs font-bold text-[#df3765]">Delivery fee: {"BZ$" + (deliveryFee / 100).toFixed(2)}</span>}</div><div className="mt-2 grid gap-3 sm:grid-cols-[2fr_1fr_1fr]"><Field name="addressLine1" label="Street address" autoComplete="address-line1" placeholder="23 Albert Street" required /><Field name="city" label="City or town" autoComplete="address-level2" placeholder="Belize City" required /><Field name="district" label="District" autoComplete="address-level1" placeholder="Belize" /></div><details className="mt-2 text-xs"><summary className="cursor-pointer font-bold text-[#75696e]">Optional address details</summary><div className="mt-2 grid gap-3 sm:grid-cols-3"><Field name="addressLine2" label="Apartment / landmark" autoComplete="address-line2" placeholder="Optional" /><Field name="postalCode" label="Postal code" autoComplete="postal-code" placeholder="Optional" /><Field name="deliveryNotes" label="Delivery note" placeholder="Gate or landmark" /></div></details></> : <div><h3 className="text-sm font-black">Seller pickup {sellerOptions.length === 1 ? "address" : "addresses"}</h3><div className="mt-2 grid gap-2 sm:grid-cols-2">{sellerOptions.map((seller) => <div key={seller.id} className="rounded-lg border border-[#eadfe2] bg-white p-3"><p className="text-xs font-black">{seller.name}</p><p className="mt-1 flex gap-1 text-[11px] text-[#75696e]"><MapPin size={13} className="shrink-0" />{seller.pickup_address || "Pickup is not configured"}</p></div>)}</div></div>}</div>
       </section>
 
@@ -188,8 +197,8 @@ function Field({ name, label, type = "text", autoComplete, placeholder, required
   return <label className="text-xs font-bold">{label}{required && <span className="text-[#ef4b74]"> *</span>}<input name={name} type={type} autoComplete={autoComplete} placeholder={placeholder} required={required} className="mt-1.5 h-10 w-full rounded-lg border border-[#e7dade] px-3 text-sm font-normal outline-none focus:border-[#ef4b74]" /></label>;
 }
 
-function ChoiceCard({ selected, icon, title, detail, onSelect }: { selected: boolean; icon: React.ReactNode; title: string; detail: string; onSelect: () => void }) {
-  return <button type="button" onClick={onSelect} className={"rounded-xl border p-3 text-center transition " + (selected ? "border-[#ef4b74] bg-[#fff2f6] text-[#df3765]" : "border-[#eadfe2] text-[#292527]")}>{icon}<span className="mt-1 block text-xs font-black">{title}</span><span className="mt-0.5 block text-[10px] text-[#817679]">{detail}</span></button>;
+function ChoiceCard({ selected, disabled = false, icon, title, detail, onSelect }: { selected: boolean; disabled?: boolean; icon: React.ReactNode; title: string; detail: string; onSelect: () => void }) {
+  return <button type="button" disabled={disabled} onClick={onSelect} className={"rounded-xl border p-3 text-center transition disabled:cursor-not-allowed disabled:opacity-50 " + (selected ? "border-[#ef4b74] bg-[#fff2f6] text-[#df3765]" : "border-[#eadfe2] text-[#292527]")}>{icon}<span className="mt-1 block text-xs font-black">{title}</span><span className="mt-0.5 block text-[10px] text-[#817679]">{detail}</span></button>;
 }
 
 function PaymentChoice({ selected, disabled = false, icon, title, detail, onSelect }: { selected: boolean; disabled?: boolean; icon: React.ReactNode; title: string; detail: string; onSelect: () => void }) {

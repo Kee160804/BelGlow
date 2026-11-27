@@ -2,12 +2,13 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
-import { Check, CircleDollarSign, Clock, PackageCheck, Store, Trash2, X } from "lucide-react";
+import { Check, CircleDollarSign, Clock, PackageCheck, Printer, Search, Share2, Store, Trash2, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { isExternalProductImage } from "@/lib/product-image-url";
 import AdminAccessManager from "@/components/admin/AdminAccessManager";
 import AdminCategoryManager from "@/components/admin/AdminCategoryManager";
 import AdminShippingManager from "@/components/admin/AdminShippingManager";
+import { readSellerCommissionLedger, sellerCommissionBalance } from "@/lib/seller-commission-ledger";
 
 type Section = "overview" | "sellers" | "approvals" | "commission" | "collections" | "orders" | "payouts" | "customers" | "categories" | "settings";
 type SellerRow = { id: string; owner_id: string; name: string; slug: string; status: string; created_at: string; rejection_reason: string | null };
@@ -24,12 +25,8 @@ type CustomerReview = { id: string; rating: number; title: string | null; body: 
 type CustomerSupportRequest = { id: string; topic: string; order_number: string | null; subject: string; message: string; status: string; admin_note: string | null; created_at: string };
 type CustomerInsights = { mostViewedProducts: Array<{ productId: string; name: string; views: number; score: number; lastViewedAt: string | null }>; topCategories: Array<{ name: string; score: number }>; interactionCount: number };
 type CustomerHistory = { customer: CustomerRow; orders: CustomerOrderDetail[]; events: CustomerEvent[]; addresses: CustomerAddress[]; reviews: CustomerReview[]; supportRequests: CustomerSupportRequest[]; insights: CustomerInsights; loading: boolean; error: string };
-type SellerProductHistory = { id: string; name: string; status: string; review_status: string; base_price_cents: number; created_at: string };
-type SellerOrderHistory = { id: string; status: string; item_subtotal_cents: number; platform_fee_cents: number; seller_net_cents: number; created_at: string };
-type SellerPayoutHistory = { id: string; status: string; net_payout_cents: number; created_at: string };
-type SellerLedgerHistory = { id: string; entry_type: string; amount_cents: number; description: string; available_at: string; created_at: string };
-type SellerPromotionHistory = { id: string; name: string; code: string; is_active: boolean; usage_count: number; created_at: string };
-type SellerHistory = { seller: SellerRow; products: SellerProductHistory[]; orders: SellerOrderHistory[]; payouts: SellerPayoutHistory[]; ledger: SellerLedgerHistory[]; promotions: SellerPromotionHistory[]; loading: boolean; error: string };
+type CompletedCommissionPayment = { id: string; amountCents: number; description: string; externalReference: string | null; paidAt: string };
+type SellerHistory = { seller: SellerRow; activeProducts: number; balanceDueCents: number; completedPayments: CompletedCommissionPayment[]; loading: boolean; error: string };
 type OrderRequestRow = { id: string; order_id: string; request_type: string; reason: string; status: string; created_at: string };
 type ReviewRow = { id: string; product_id: string; rating: number; title: string | null; body: string | null; created_at: string };
 type RefundRow = { id: string; order_id: string; amount_cents: number; reason: string | null; status: string; created_at: string };
@@ -43,6 +40,61 @@ async function fetchAdminAccounts(): Promise<{ data: CustomerRow[]; error: { mes
   } catch (accountError) {
     return { data: [], error: { message: accountError instanceof Error ? accountError.message : "Customer accounts could not be loaded." } };
   }
+}
+
+async function fetchCommissionCollectionSummary(storeId?: string): Promise<{ data: CommissionCollectionRow[]; error: { message: string } | null }> {
+  const supabase = createClient();
+  let storesQuery = supabase.from("seller_stores").select("id, name, status");
+  storesQuery = storeId ? storesQuery.eq("id", storeId) : storesQuery.in("status", ["approved", "suspended"]);
+  const { data: stores, error: storesError } = await storesQuery;
+  if (storesError) return { data: [], error: storesError };
+  if (!stores?.length) return { data: [], error: null };
+
+  const storeIds = stores.map((store) => store.id);
+  const balances = new Map(storeIds.map((id) => [id, 0]));
+  const lastPayments = new Map<string, string>();
+  const pageSize = 1000;
+  let offset = 0;
+  while (true) {
+    const { data: entries, error: entriesError } = await supabase.from("seller_commission_entries")
+      .select("seller_store_id, entry_type, amount_cents, created_at")
+      .in("seller_store_id", storeIds)
+      .order("created_at")
+      .order("id")
+      .range(offset, offset + pageSize - 1);
+    if (entriesError) return { data: [], error: entriesError };
+    for (const entry of entries ?? []) {
+      balances.set(entry.seller_store_id, (balances.get(entry.seller_store_id) ?? 0) + Number(entry.amount_cents));
+      if (entry.entry_type === "payment" && Number(entry.amount_cents) < 0) lastPayments.set(entry.seller_store_id, entry.created_at);
+    }
+    if (!entries || entries.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  return {
+    data: stores.map((store) => ({
+      seller_store_id: store.id,
+      store_name: store.name,
+      store_status: store.status,
+      balance_due_cents: Math.max(balances.get(store.id) ?? 0, 0),
+      last_payment_at: lastPayments.get(store.id) ?? null,
+    })),
+    error: null,
+  };
+}
+
+async function fetchSellerCommissionHistory(storeId: string): Promise<{ balanceDueCents: number; completedPayments: CompletedCommissionPayment[]; error: { message: string } | null }> {
+  const { entries, error } = await readSellerCommissionLedger(storeId);
+  if (error) return { balanceDueCents: 0, completedPayments: [], error };
+  const completedPayments = entries.filter((entry) => entry.entry_type === "payment" && Number(entry.amount_cents) < 0).map((entry) => ({
+    id: entry.id,
+    amountCents: Math.abs(Number(entry.amount_cents)),
+    description: entry.description,
+    externalReference: entry.external_reference,
+    paidAt: entry.created_at,
+  }));
+  completedPayments.sort((first, second) => new Date(second.paidAt).getTime() - new Date(first.paidAt).getTime());
+  return { balanceDueCents: sellerCommissionBalance(entries), completedPayments, error: null };
 }
 
 export default function AdminMarketplaceTools({ section }: { section: Section }) {
@@ -85,7 +137,7 @@ export default function AdminMarketplaceTools({ section }: { section: Section })
       needsSettings ? supabase.from("marketplace_settings").select("default_commission_bps, seller_applications_open").eq("singleton", true).maybeSingle() : Promise.resolve({ data: null, error: null }),
       needsOrders ? supabase.from("orders").select("id, order_number, email, total_cents, payment_status, fulfillment_status, created_at").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
       section === "payouts" ? supabase.from("seller_payouts").select("id, seller_store_id, status, net_payout_cents, created_at").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
-      section === "collections" ? supabase.rpc("admin_commission_collection_summary") : Promise.resolve({ data: [], error: null }),
+      section === "collections" ? fetchCommissionCollectionSummary() : Promise.resolve({ data: [], error: null }),
       section === "customers" ? fetchAdminAccounts() : Promise.resolve({ data: [], error: null }),
       section === "orders" ? supabase.from("order_requests").select("id, order_id, request_type, reason, status, created_at").eq("status", "pending").order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
       section === "approvals" ? supabase.from("reviews").select("id, product_id, rating, title, body, created_at").eq("is_approved", false).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
@@ -327,23 +379,18 @@ export default function AdminMarketplaceTools({ section }: { section: Section })
   }
 
   async function showSellerHistory(seller: SellerRow) {
-    setSellerHistory({ seller, products: [], orders: [], payouts: [], ledger: [], promotions: [], loading: true, error: "" });
+    setSellerHistory({ seller, activeProducts: 0, balanceDueCents: 0, completedPayments: [], loading: true, error: "" });
     const supabase = createClient();
-    const [productsResult, ordersResult, payoutsResult, ledgerResult, promotionsResult] = await Promise.all([
-      supabase.from("products").select("id, name, status, review_status, base_price_cents, created_at").eq("seller_store_id", seller.id).order("created_at", { ascending: false }),
-      supabase.from("seller_orders").select("id, status, item_subtotal_cents, platform_fee_cents, seller_net_cents, created_at").eq("seller_store_id", seller.id).order("created_at", { ascending: false }).limit(100),
-      supabase.from("seller_payouts").select("id, status, net_payout_cents, created_at").eq("seller_store_id", seller.id).order("created_at", { ascending: false }).limit(100),
-      supabase.from("seller_ledger_entries").select("id, entry_type, amount_cents, description, available_at, created_at").eq("seller_store_id", seller.id).order("created_at", { ascending: false }).limit(200),
-      supabase.from("promotions").select("id, name, code, is_active, usage_count, created_at").eq("seller_store_id", seller.id).order("created_at", { ascending: false }).limit(100),
+    const [productsResult, balanceResult] = await Promise.all([
+      supabase.from("products").select("id", { count: "exact", head: true }).eq("seller_store_id", seller.id).eq("status", "active").eq("review_status", "approved"),
+      fetchSellerCommissionHistory(seller.id),
     ]);
-    const historyError = productsResult.error?.message || ordersResult.error?.message || payoutsResult.error?.message || ledgerResult.error?.message || promotionsResult.error?.message || "";
+    const historyError = productsResult.error?.message || balanceResult.error?.message || "";
     setSellerHistory({
       seller,
-      products: (productsResult.data ?? []) as SellerProductHistory[],
-      orders: (ordersResult.data ?? []) as SellerOrderHistory[],
-      payouts: (payoutsResult.data ?? []) as SellerPayoutHistory[],
-      ledger: (ledgerResult.data ?? []) as SellerLedgerHistory[],
-      promotions: (promotionsResult.data ?? []) as SellerPromotionHistory[],
+      activeProducts: productsResult.count ?? 0,
+      balanceDueCents: balanceResult.balanceDueCents,
+      completedPayments: balanceResult.completedPayments,
       loading: false,
       error: historyError,
     });
@@ -520,33 +567,84 @@ function CustomerHistoryModal({ history, onClose }: { history: CustomerHistory; 
 }
 
 function SellerHistoryModal({ history, onClose }: { history: SellerHistory; onClose: () => void }) {
-  const grossSales = history.orders.reduce((sum, order) => sum + Number(order.item_subtotal_cents), 0);
-  const platformFees = history.orders.reduce((sum, order) => sum + Number(order.platform_fee_cents), 0);
-  const sellerNet = history.orders.reduce((sum, order) => sum + Number(order.seller_net_cents), 0);
-  const paidOut = history.payouts.filter((payout) => payout.status === "paid").reduce((sum, payout) => sum + Number(payout.net_payout_cents), 0);
+  const now = new Date();
+  const nextDueDate = new Date(now.getFullYear(), now.getMonth() + 1, 7);
+  const [activeTab, setActiveTab] = useState<"summary" | "payments">("summary");
+  const [paymentPeriod, setPaymentPeriod] = useState("all");
+  const [paymentSearch, setPaymentSearch] = useState("");
+  const [paymentNotice, setPaymentNotice] = useState("");
+  const visiblePayments = history.completedPayments.filter((payment) => {
+    const date = new Date(payment.paidAt);
+    const dateMatches = paymentPeriod === "all"
+      || paymentPeriod === "year" && date.getFullYear() === now.getFullYear()
+      || paymentPeriod === "30" && date.getTime() >= now.getTime() - 30 * 24 * 60 * 60 * 1000
+      || paymentPeriod === "90" && date.getTime() >= now.getTime() - 90 * 24 * 60 * 60 * 1000;
+    const query = paymentSearch.trim().toLowerCase();
+    const textMatches = !query || payment.description.toLowerCase().includes(query) || (payment.externalReference ?? "").toLowerCase().includes(query);
+    return dateMatches && textMatches;
+  });
 
-  return <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-[#211a1d]/60 p-4 backdrop-blur-sm sm:p-8" role="dialog" aria-modal="true" aria-labelledby="seller-history-title" onMouseDown={onClose}>
-    <section onMouseDown={(event) => event.stopPropagation()} className="relative w-full max-w-5xl rounded-[28px] bg-white p-5 shadow-2xl sm:p-7">
+  function receiptText(payment: CompletedCommissionPayment) {
+    return [
+      "BelGlow commission payment receipt",
+      `Business: ${history.seller.name}`,
+      `Amount paid: BZ$${(payment.amountCents / 100).toFixed(2)}`,
+      `Payment date: ${new Date(payment.paidAt).toLocaleString("en-BZ")}`,
+      `Payment reference: ${payment.description.replace(/^BelGlow commission payment\s*/i, "")}`,
+      payment.externalReference ? `Bank reference: ${payment.externalReference}` : "",
+      `Ledger entry: ${payment.id}`,
+    ].filter(Boolean).join("\n");
+  }
+
+  function printPayment(payment: CompletedCommissionPayment) {
+    const printWindow = window.open("", "_blank", "popup,width=720,height=760");
+    if (!printWindow) { setPaymentNotice("Allow pop-ups to print this payment receipt."); return; }
+    const safeText = (value: string) => value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[character] ?? character));
+    const details = receiptText(payment).split("\n").map((line) => `<p>${safeText(line)}</p>`).join("");
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>BelGlow commission receipt</title><style>body{font:15px Arial,sans-serif;color:#292326;margin:48px}h1{font-family:Georgia,serif;font-size:28px}p{padding:10px 0;border-bottom:1px solid #eee5e1}@media print{body{margin:18mm}}</style></head><body><h1>BelGlow commission payment receipt</h1>${details}</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  }
+
+  async function sharePayment(payment: CompletedCommissionPayment) {
+    const text = receiptText(payment);
+    try {
+      if (navigator.share) await navigator.share({ title: "BelGlow commission payment receipt", text });
+      else { await navigator.clipboard.writeText(text); setPaymentNotice("Receipt details copied so you can share them."); }
+    } catch (cause) {
+      if (cause instanceof Error && cause.name === "AbortError") return;
+      setPaymentNotice("Could not share the receipt here. Use Print to save a copy.");
+    }
+  }
+
+  return <div className="fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto bg-[#211a1d]/60 p-4 backdrop-blur-sm sm:p-8" role="dialog" aria-modal="true" aria-labelledby="seller-history-title" onMouseDown={onClose}>
+    <section onMouseDown={(event) => event.stopPropagation()} className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-[28px] bg-white p-5 shadow-2xl sm:p-7">
       <button type="button" onClick={onClose} className="absolute right-5 top-5 rounded-full bg-[#f7efed] p-2" aria-label="Close seller history"><X size={19} /></button>
       <p className="text-xs font-bold uppercase tracking-[.18em] text-[#a85855]">Seller business history</p>
       <h2 id="seller-history-title" className="mt-2 pr-12 font-serif text-3xl font-semibold">{history.seller.name}</h2>
       <p className="mt-1 text-sm text-[#756a6d]">{history.seller.slug} - {history.seller.status} - Joined {new Date(history.seller.created_at).toLocaleDateString()}</p>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <HistoryStat label="Products" value={String(history.products.length)} />
-        <HistoryStat label="Seller orders" value={String(history.orders.length)} />
-        <HistoryStat label="Gross sales" value={`BZ$${(grossSales / 100).toFixed(2)}`} />
-        <HistoryStat label="Platform fees" value={`BZ$${(platformFees / 100).toFixed(2)}`} />
-        <HistoryStat label="Seller net" value={`BZ$${(sellerNet / 100).toFixed(2)}`} />
-      </div>
       {history.loading && <p className="mt-6 rounded-xl bg-[#faf6f4] p-5 text-sm text-[#756a6d]">Loading seller business history...</p>}
       {history.error && <p role="alert" className="mt-6 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{history.error}</p>}
-      {!history.loading && !history.error && <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <div><h3 className="font-bold">Products</h3><div className="mt-2 space-y-2">{history.products.map((product) => <div key={product.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#faf6f4] px-4 py-3 text-sm"><div><strong>{product.name}</strong><p className="mt-1 text-xs capitalize text-[#817679]">{product.status} - review: {product.review_status} - {new Date(product.created_at).toLocaleDateString()}</p></div><span className="font-semibold">BZ${(Number(product.base_price_cents) / 100).toFixed(2)}</span></div>)}{!history.products.length && <p className="text-sm text-[#817679]">No products recorded for this store.</p>}</div></div>
-        <div><h3 className="font-bold">Orders and earnings</h3><div className="mt-2 space-y-2">{history.orders.map((order) => <div key={order.id} className="rounded-xl bg-[#faf6f4] px-4 py-3 text-sm"><div className="flex justify-between gap-3"><strong className="capitalize">{order.status}</strong><span>{new Date(order.created_at).toLocaleDateString()}</span></div><p className="mt-1 text-xs text-[#817679]">Gross BZ${(Number(order.item_subtotal_cents) / 100).toFixed(2)} - Fee BZ${(Number(order.platform_fee_cents) / 100).toFixed(2)} - Net BZ${(Number(order.seller_net_cents) / 100).toFixed(2)}</p></div>)}{!history.orders.length && <p className="text-sm text-[#817679]">No seller orders recorded.</p>}</div></div>
-        <div><div className="flex items-center justify-between gap-3"><h3 className="font-bold">Payouts</h3><span className="text-xs font-semibold text-[#817679]">Paid BZ${(paidOut / 100).toFixed(2)}</span></div><div className="mt-2 space-y-2">{history.payouts.map((payout) => <div key={payout.id} className="flex items-center justify-between gap-3 rounded-xl bg-[#faf6f4] px-4 py-3 text-sm"><div><strong className="capitalize">{payout.status}</strong><p className="mt-1 text-xs text-[#817679]">{new Date(payout.created_at).toLocaleDateString()}</p></div><span className="font-semibold">BZ${(Number(payout.net_payout_cents) / 100).toFixed(2)}</span></div>)}{!history.payouts.length && <p className="text-sm text-[#817679]">No payouts recorded.</p>}</div></div>
-        <div><h3 className="font-bold">Promotions</h3><div className="mt-2 space-y-2">{history.promotions.map((promotion) => <div key={promotion.id} className="rounded-xl bg-[#faf6f4] px-4 py-3 text-sm"><div className="flex justify-between gap-3"><strong>{promotion.name}</strong><span className={promotion.is_active ? "text-emerald-700" : "text-[#817679]"}>{promotion.is_active ? "Active" : "Inactive"}</span></div><p className="mt-1 text-xs text-[#817679]">{promotion.code} - {promotion.usage_count} use{promotion.usage_count === 1 ? "" : "s"}</p></div>)}{!history.promotions.length && <p className="text-sm text-[#817679]">No promotions recorded.</p>}</div></div>
-        <div className="lg:col-span-2"><h3 className="font-bold">Financial ledger</h3><div className="mt-2 max-h-80 space-y-2 overflow-y-auto">{history.ledger.map((entry) => <div key={entry.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#faf6f4] px-4 py-3 text-sm"><div><strong className="capitalize">{entry.entry_type.replaceAll("_", " ")}</strong><p className="mt-1 text-xs text-[#817679]">{entry.description} - {new Date(entry.created_at).toLocaleString()}</p></div><span className={`font-semibold ${Number(entry.amount_cents) < 0 ? "text-rose-700" : "text-emerald-700"}`}>{Number(entry.amount_cents) < 0 ? "-" : "+"}BZ${(Math.abs(Number(entry.amount_cents)) / 100).toFixed(2)}</span></div>)}{!history.ledger.length && <p className="text-sm text-[#817679]">No ledger entries recorded.</p>}</div></div>
-      </div>}
+      {!history.loading && !history.error && <>
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <HistoryStat label="Active products" value={String(history.activeProducts)} />
+          <HistoryStat label="Owed to BelGlow" value={`BZ$${(history.balanceDueCents / 100).toFixed(2)}`} />
+          <HistoryStat label="Next due payment" value={nextDueDate.toLocaleDateString("en-BZ", { day: "numeric", month: "short", year: "numeric" })} />
+        </div>
+        <div className="mt-6 border-b border-[#eee5e1]" role="tablist" aria-label="Seller business history">
+          <button type="button" role="tab" aria-selected={activeTab === "summary"} onClick={() => setActiveTab("summary")} className={`mr-5 border-b-2 px-1 py-3 text-sm font-bold ${activeTab === "summary" ? "border-[#bf6d68] text-[#a85855]" : "border-transparent text-[#817679]"}`}>Business summary</button>
+          <button type="button" role="tab" aria-selected={activeTab === "payments"} onClick={() => setActiveTab("payments")} className={`border-b-2 px-1 py-3 text-sm font-bold ${activeTab === "payments" ? "border-[#bf6d68] text-[#a85855]" : "border-transparent text-[#817679]"}`}>Completed payments <span className="ml-1 rounded-full bg-[#f7efed] px-2 py-0.5 text-xs">{history.completedPayments.length}</span></button>
+        </div>
+        {activeTab === "summary" ? <p className="mt-4 text-sm leading-6 text-[#756a6d]">Commission due is calculated from this seller’s commission ledger. Completed payments reduce the balance shown above.</p> : <section role="tabpanel" className="pt-4">
+          <div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="font-bold">Completed payments</h3><p className="mt-1 text-xs text-[#817679]">Verified BelGlow commission payments recorded for this seller.</p></div><div className="flex flex-wrap gap-2"><label className="relative"><span className="sr-only">Search payments</span><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#817679]" /><input value={paymentSearch} onChange={(event) => setPaymentSearch(event.target.value)} placeholder="Search reference" className="h-10 w-44 rounded-lg border border-[#ddd3d0] pl-9 pr-3 text-sm outline-none focus:border-[#bf6d68]" /></label><label><span className="sr-only">Filter payments by date</span><select value={paymentPeriod} onChange={(event) => setPaymentPeriod(event.target.value)} className="h-10 rounded-lg border border-[#ddd3d0] bg-white px-3 text-sm"><option value="all">All dates</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="year">This year</option></select></label></div></div>
+          {paymentNotice && <p role="status" className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{paymentNotice}</p>}
+          <div className="mt-4 divide-y divide-[#eee5e1] rounded-xl border border-[#eee5e1]">
+            {visiblePayments.map((payment) => <article key={payment.id} className="flex flex-wrap items-center gap-3 p-4"><div className="min-w-[180px] flex-1"><p className="font-semibold">BZ${(payment.amountCents / 100).toFixed(2)} <span className="ml-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">Completed</span></p><p className="mt-1 text-xs text-[#756a6d]">{new Date(payment.paidAt).toLocaleString("en-BZ")}</p><p className="mt-1 break-all text-xs text-[#817679]">{payment.description.replace(/^BelGlow commission payment\s*/i, "")}{payment.externalReference ? ` · Bank ref ${payment.externalReference}` : ""}</p></div><div className="flex gap-2"><button type="button" onClick={() => printPayment(payment)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#d8cecb] px-3 py-2 text-xs font-bold text-[#62595c]"><Printer size={14} /> Print</button><button type="button" onClick={() => void sharePayment(payment)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#d8cecb] px-3 py-2 text-xs font-bold text-[#62595c]"><Share2 size={14} /> Share</button></div></article>)}
+            {!visiblePayments.length && <p className="p-5 text-center text-sm text-[#817679]">{history.completedPayments.length ? "No completed payments match these filters." : "No completed commission payments are recorded for this seller yet."}</p>}
+          </div>
+        </section>}
+      </>}
     </section>
   </div>;
 }

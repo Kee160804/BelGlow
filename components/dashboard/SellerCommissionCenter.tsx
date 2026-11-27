@@ -3,14 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownToLine, ArrowRight, BadgePercent, CalendarDays, CheckCircle2, CreditCard, FileText, LoaderCircle, Printer, ReceiptText, Smartphone, WalletCards, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { readSellerCommissionLedger, sellerCommissionBalance, type SellerCommissionLedgerEntry } from "@/lib/seller-commission-ledger";
 
-type CommissionEntry = {
-  id: string;
-  entry_type: "sale_commission" | "payment" | "adjustment" | "refund";
-  amount_cents: number;
-  description: string;
-  created_at: string;
-};
+type CommissionEntry = SellerCommissionLedgerEntry;
 
 type PaymentMethod = "digiwallet" | "card";
 type Tab = "overview" | "invoices" | "sales";
@@ -37,11 +32,11 @@ export default function SellerCommissionCenter() {
     if (storeError || !store) { setError(storeError?.message || "No seller store is connected to this account."); setLoading(false); return; }
     setStoreName(store.name);
     const [entryResult, settingsResult] = await Promise.all([
-      supabase.from("seller_commission_entries").select("id, entry_type, amount_cents, description, created_at").eq("seller_store_id", store.id).order("created_at", { ascending: false }),
+      readSellerCommissionLedger(store.id),
       supabase.from("marketplace_settings").select("default_commission_bps").eq("singleton", true).maybeSingle(),
     ]);
     if (entryResult.error) setError(entryResult.error.message);
-    else setEntries((entryResult.data ?? []) as CommissionEntry[]);
+    else setEntries(entryResult.entries);
     setCommissionBps(store.commission_rate_bps ?? settingsResult.data?.default_commission_bps ?? 1000);
     setLoading(false);
   }, []);
@@ -71,7 +66,7 @@ export default function SellerCommissionCenter() {
     return () => { document.body.style.overflow = previousOverflow; document.body.style.paddingRight = previousPaddingRight; };
   }, [paymentOpen]);
 
-  const balance = entries.reduce((sum, entry) => sum + Number(entry.amount_cents), 0);
+  const balance = sellerCommissionBalance(entries);
   const sales = entries.filter((entry) => entry.entry_type === "sale_commission");
   const payments = entries.filter((entry) => entry.entry_type === "payment");
   const totalCommission = sales.reduce((sum, entry) => sum + Number(entry.amount_cents), 0);

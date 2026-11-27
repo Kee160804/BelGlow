@@ -3,14 +3,14 @@
 import Link from "next/link";
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { BadgePercent, BarChart3, ImagePlus, MessageSquareReply, Plus, Store, Trash2, Users, X } from "lucide-react";
+import { BadgePercent, BarChart3, ChevronLeft, ChevronRight, ImagePlus, Mail, MessageSquareReply, Phone, Plus, Search, Star, Store, Trash2, Users, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 
 type Section = "customers" | "reviews" | "promotions" | "analytics" | "store-profile" | "settings";
-type StoreRow = { id: string; name: string; description: string | null; support_email: string | null; support_phone: string | null; location: string | null; brand_story: string | null; logo_url: string | null; preparation_days_min: number; preparation_days_max: number; return_window_days: number; notification_preferences: Record<string, boolean> | null; delivery_areas: string | null; delivery_instructions: string | null; offers_delivery: boolean; offers_pickup: boolean; delivery_fee_cents: number | null; pickup_address: string | null };
+type StoreRow = { id: string; name: string; description: string | null; support_email: string | null; support_phone: string | null; location: string | null; brand_story: string | null; logo_url: string | null; preparation_days_min: number; preparation_days_max: number; return_window_days: number; notification_preferences: Record<string, boolean> | null; delivery_areas: string | null; delivery_instructions: string | null; offers_delivery: boolean; offers_pickup: boolean; delivery_fee_cents: number | null; pickup_address: string | null; favorite_customer_order_threshold: number };
 type PaymentProfile = { id: string; bank_name: string; account_name: string; account_number: string; account_type: string | null; instructions: string | null; is_active: boolean };
-type SellerOrder = { id: string; order_id: string; seller_net_cents: number; item_subtotal_cents: number; platform_fee_cents: number; status: string; created_at: string };
-type ParentOrder = { id: string; email: string; order_number: number; created_at: string };
+type SellerOrder = { id: string; order_id: string; seller_net_cents: number; item_subtotal_cents: number; customer_payment_cents: number; payment_status: string; platform_fee_cents: number; status: string; created_at: string };
+type ParentOrder = { id: string; email: string; phone: string | null; shipping_address: Record<string, string> | null; order_number: number; created_at: string };
 type Review = { id: string; product_id: string; rating: number; title: string | null; body: string | null; created_at: string };
 type Reply = { review_id: string; body: string };
 type Promotion = { id: string; code: string; name: string; description?: string | null; discount_type: string; discount_value: number; minimum_order_cents?: number; starts_at: string | null; ends_at: string | null; usage_count: number; usage_limit: number | null; is_active: boolean };
@@ -33,14 +33,14 @@ export default function SellerBusinessTools({ section }: { section: Section }) {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setError("Sign in again to manage your seller account."); setLoading(false); return; }
-    const storeResult = await supabase.from("seller_stores").select("id, name, description, support_email, support_phone, location, brand_story, logo_url, preparation_days_min, preparation_days_max, return_window_days, notification_preferences, delivery_areas, delivery_instructions, offers_delivery, offers_pickup, delivery_fee_cents, pickup_address").eq("owner_id", user.id).maybeSingle();
-    const legacyStoreResult = storeResult.error?.message.includes("delivery_areas")
+    const storeResult = await supabase.from("seller_stores").select("id, name, description, support_email, support_phone, location, brand_story, logo_url, preparation_days_min, preparation_days_max, return_window_days, notification_preferences, delivery_areas, delivery_instructions, offers_delivery, offers_pickup, delivery_fee_cents, pickup_address, favorite_customer_order_threshold").eq("owner_id", user.id).maybeSingle();
+    const legacyStoreResult = storeResult.error?.message.includes("delivery_areas") || storeResult.error?.message.includes("favorite_customer_order_threshold")
       ? await supabase.from("seller_stores").select("id, name, description, support_email, support_phone, location, brand_story, logo_url, preparation_days_min, preparation_days_max, return_window_days, notification_preferences").eq("owner_id", user.id).maybeSingle()
       : null;
     const storeData = storeResult.data ?? legacyStoreResult?.data;
     const storeError = legacyStoreResult?.error ?? storeResult.error;
     if (storeError || !storeData) { setError(storeError?.message ?? "Seller store not found."); setLoading(false); return; }
-    const sellerStore = { ...storeData, delivery_areas: "delivery_areas" in storeData ? storeData.delivery_areas : null, delivery_instructions: "delivery_instructions" in storeData ? storeData.delivery_instructions : null, offers_delivery: "offers_delivery" in storeData ? storeData.offers_delivery : true, offers_pickup: "offers_pickup" in storeData ? storeData.offers_pickup : true, delivery_fee_cents: "delivery_fee_cents" in storeData ? storeData.delivery_fee_cents : null, pickup_address: "pickup_address" in storeData ? storeData.pickup_address : null } as StoreRow;
+    const sellerStore = { ...storeData, delivery_areas: "delivery_areas" in storeData ? storeData.delivery_areas : null, delivery_instructions: "delivery_instructions" in storeData ? storeData.delivery_instructions : null, offers_delivery: "offers_delivery" in storeData ? storeData.offers_delivery : true, offers_pickup: "offers_pickup" in storeData ? storeData.offers_pickup : true, delivery_fee_cents: "delivery_fee_cents" in storeData ? storeData.delivery_fee_cents : null, pickup_address: "pickup_address" in storeData ? storeData.pickup_address : null, favorite_customer_order_threshold: "favorite_customer_order_threshold" in storeData ? storeData.favorite_customer_order_threshold : 5 } as StoreRow;
     setStore(sellerStore);
     if (section === "settings") {
       const { data: bankProfiles } = await supabase.from("seller_payment_profiles").select("id, bank_name, account_name, account_number, account_type, instructions, is_active").eq("seller_store_id", sellerStore.id).order("created_at", { ascending: true });
@@ -48,19 +48,41 @@ export default function SellerBusinessTools({ section }: { section: Section }) {
     }
     const needsOrders = section === "customers" || section === "analytics";
     const needsProducts = section === "reviews";
+    const sellerOrdersPromise = (async () => {
+      if (!needsOrders) return { data: [], error: null };
+      const query = () => supabase.from("seller_orders").select("id, order_id, seller_net_cents, item_subtotal_cents, customer_payment_cents, payment_status, platform_fee_cents, status, created_at").eq("seller_store_id", sellerStore.id).order("created_at", { ascending: false }).order("id", { ascending: true });
+      if (section !== "customers") return query().limit(50);
+      const rows: SellerOrder[] = [];
+      const pageSize = 500;
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error: pageError } = await query().range(offset, offset + pageSize - 1);
+        if (pageError) return { data: null, error: pageError };
+        const page = (data ?? []) as SellerOrder[];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+      }
+      return { data: rows, error: null };
+    })();
     const [orderResult, productResult, promotionResult] = await Promise.all([
-      needsOrders ? supabase.from("seller_orders").select("id, order_id, seller_net_cents, item_subtotal_cents, platform_fee_cents, status, created_at").eq("seller_store_id", sellerStore.id).order("created_at", { ascending: false }).limit(50) : Promise.resolve({ data: [], error: null }),
+      sellerOrdersPromise,
       needsProducts ? supabase.from("products").select("id, name").eq("seller_store_id", sellerStore.id) : Promise.resolve({ data: [], error: null }),
       section === "promotions" ? supabase.from("promotions").select("id, code, name, description, discount_type, discount_value, minimum_order_cents, starts_at, ends_at, usage_count, usage_limit, is_active").eq("seller_store_id", sellerStore.id).order("created_at", { ascending: false }).limit(50) : Promise.resolve({ data: [], error: null }),
     ]);
     const sellerOrders = (orderResult.data ?? []) as SellerOrder[];
+    if (orderResult.error) setError(orderResult.error.message);
     const products = productResult.data ?? [];
     setOrders(sellerOrders);
     setProductNames(new Map(products.map((product) => [product.id, product.name])));
     setPromotions((promotionResult.data ?? []) as Promotion[]);
     if (sellerOrders.length) {
-      const { data } = await supabase.from("orders").select("id, email, order_number, created_at").in("id", sellerOrders.map((order) => order.order_id));
-      setParentOrders((data ?? []) as ParentOrder[]);
+      const parentRows: ParentOrder[] = [];
+      const orderIds = [...new Set(sellerOrders.map((order) => order.order_id))];
+      for (let offset = 0; offset < orderIds.length; offset += 500) {
+        const { data, error: parentError } = await supabase.from("orders").select("id, email, phone, shipping_address, order_number, created_at").in("id", orderIds.slice(offset, offset + 500));
+        if (parentError) { setError(parentError.message); break; }
+        parentRows.push(...((data ?? []) as ParentOrder[]));
+      }
+      setParentOrders(parentRows);
     } else setParentOrders([]);
     if (products.length) {
       const { data: reviewRows } = await supabase.from("reviews").select("id, product_id, rating, title, body, created_at").in("product_id", products.map((product) => product.id)).eq("is_approved", true).order("created_at", { ascending: false });
@@ -141,6 +163,20 @@ export default function SellerBusinessTools({ section }: { section: Section }) {
     else { setNotice("Bank account removed."); await load(); }
   }
 
+  async function saveFavoriteCustomerThreshold(threshold: number) {
+    if (!store || !Number.isInteger(threshold) || threshold < 1 || threshold > 100) {
+      setError("Choose a whole number from 1 to 100 purchases.");
+      return false;
+    }
+    setBusy("favorite-threshold"); setError(""); setNotice("");
+    const { error: saveError } = await createClient().rpc("save_seller_favorite_customer_threshold", { purchase_threshold: threshold });
+    setBusy("");
+    if (saveError) { setError(saveError.message); return false; }
+    setStore((current) => current ? { ...current, favorite_customer_order_threshold: threshold } : current);
+    setNotice(`Favorite customer threshold set to ${threshold} ${threshold === 1 ? "purchase" : "purchases"}.`);
+    return true;
+  }
+
   async function uploadLogo(file: File) {
     if (!store) return;
     if (!file.type.startsWith("image/") || file.size > 10 * 1024 * 1024) { setError("Choose a JPG, PNG, WebP, or AVIF image no larger than 10 MB."); return; }
@@ -196,14 +232,50 @@ export default function SellerBusinessTools({ section }: { section: Section }) {
   if (loading) return <Panel><p className="py-12 text-center text-sm text-[#817679]">Loading seller data…</p></Panel>;
   if (!store) return <Panel><p className="text-sm text-rose-700">{error || "Seller store not found."}</p></Panel>;
 
-  return <div className="space-y-5">{error && <p role="alert" className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}{notice && <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</p>}{section === "customers" ? <Customers orders={orders} parentOrders={parentOrders} /> : section === "reviews" ? <Reviews reviews={reviews} replies={replies} products={productNames} busy={busy} onReply={saveReply} /> : section === "promotions" ? <Promotions promotions={promotions} busy={busy} onCreate={createPromotion} /> : section === "analytics" ? <Analytics orders={orders} /> : section === "store-profile" ? <StoreProfile store={store} busy={busy} onSave={saveProfile} onLogo={uploadLogo} /> : <Settings store={store} paymentProfiles={paymentProfiles} busy={busy} onSave={saveSettings} onSaveAccount={savePaymentAccount} onDeleteAccount={removePaymentAccount} />}</div>;
+  return <div className="space-y-5">{error && <p role="alert" className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}{notice && <p role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</p>}{section === "customers" ? <Customers orders={orders} parentOrders={parentOrders} threshold={store.favorite_customer_order_threshold} saving={busy === "favorite-threshold"} onSaveThreshold={saveFavoriteCustomerThreshold} /> : section === "reviews" ? <Reviews reviews={reviews} replies={replies} products={productNames} busy={busy} onReply={saveReply} /> : section === "promotions" ? <Promotions promotions={promotions} busy={busy} onCreate={createPromotion} /> : section === "analytics" ? <Analytics orders={orders} /> : section === "store-profile" ? <StoreProfile store={store} busy={busy} onSave={saveProfile} onLogo={uploadLogo} /> : <Settings store={store} paymentProfiles={paymentProfiles} busy={busy} onSave={saveSettings} onSaveAccount={savePaymentAccount} onDeleteAccount={removePaymentAccount} />}</div>;
 }
 
-function Customers({ orders, parentOrders }: { orders: SellerOrder[]; parentOrders: ParentOrder[] }) {
+function Customers({ orders, parentOrders, threshold, saving, onSaveThreshold }: { orders: SellerOrder[]; parentOrders: ParentOrder[]; threshold: number; saving: boolean; onSaveThreshold: (threshold: number) => Promise<boolean> }) {
+  const [search, setSearch] = useState("");
+  const [thresholdInput, setThresholdInput] = useState(String(threshold));
+  const [page, setPage] = useState(0);
+  useEffect(() => setThresholdInput(String(threshold)), [threshold]);
   const details = new Map(parentOrders.map((order) => [order.id, order]));
-  const customers = new Map<string, { email: string; count: number; spent: number; last: string }>();
-  for (const order of orders) { const parent = details.get(order.order_id); if (!parent) continue; const key = parent.email.toLowerCase(); const row = customers.get(key) ?? { email: parent.email, count: 0, spent: 0, last: parent.created_at }; row.count += 1; row.spent += order.item_subtotal_cents; if (parent.created_at > row.last) row.last = parent.created_at; customers.set(key, row); }
-  return <Panel><div className="flex items-center gap-3"><Users className="text-[#b35f5b]" /><div><h2 className="font-bold">Your customers</h2><p className="text-sm text-[#756a6d]">Only shoppers who purchased from your store are shown.</p></div></div><div className="mt-5 divide-y divide-[#eee5e1]">{[...customers.values()].map((customer) => <article key={customer.email} className="flex items-center gap-4 py-4"><span className="grid h-10 w-10 place-items-center rounded-full bg-[#f4dfda] font-bold text-[#a85855]">{customer.email.charAt(0).toUpperCase()}</span><div className="min-w-0 flex-1"><p className="truncate font-semibold">{customer.email}</p><p className="text-xs text-[#817679]">{customer.count} {customer.count === 1 ? "order" : "orders"} · Last order {new Date(customer.last).toLocaleDateString()}</p></div><strong className="text-sm">BZ${(customer.spent / 100).toFixed(2)}</strong></article>)}{!customers.size && <Empty text="Customers appear after they purchase from your store." />}</div></Panel>;
+  const customers = new Map<string, { name: string; email: string; phone: string; count: number; spent: number; last: string }>();
+  for (const order of orders) {
+    if (order.payment_status !== "confirmed") continue;
+    const parent = details.get(order.order_id);
+    if (!parent?.email) continue;
+    const key = parent.email.trim().toLowerCase();
+    const address = parent.shipping_address ?? {};
+    const name = address.recipient_name?.trim() || "Customer";
+    const phone = parent.phone?.trim() || address.phone?.trim() || "";
+    const row = customers.get(key) ?? { name, email: parent.email, phone, count: 0, spent: 0, last: parent.created_at };
+    row.count += 1;
+    row.spent += order.customer_payment_cents ?? order.item_subtotal_cents;
+    if (parent.created_at > row.last) {
+      row.last = parent.created_at;
+      if (name !== "Customer") row.name = name;
+      if (phone) row.phone = phone;
+      row.email = parent.email;
+    }
+    customers.set(key, row);
+  }
+  const allCustomers = [...customers.values()].sort((a, b) => Number(b.count >= threshold) - Number(a.count >= threshold) || b.count - a.count || b.spent - a.spent || a.name.localeCompare(b.name));
+  const normalizedSearch = search.trim().toLowerCase();
+  const filtered = allCustomers.filter((customer) => `${customer.name} ${customer.email} ${customer.phone}`.toLowerCase().includes(normalizedSearch));
+  const pageSize = 10;
+  const pageCount = Math.ceil(filtered.length / pageSize);
+  const currentPage = Math.min(page, Math.max(pageCount - 1, 0));
+  const visibleCustomers = filtered.slice(currentPage * pageSize, currentPage * pageSize + pageSize);
+  const favoriteCount = allCustomers.filter((customer) => customer.count >= threshold).length;
+  return <Panel>
+    <div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-center gap-3"><Users className="mt-1 shrink-0 text-[#b35f5b]" /><div><h2 className="font-bold">Your customers</h2><p className="text-sm text-[#756a6d]">Contact details and confirmed purchases from your store.</p></div></div><div className="rounded-full bg-[#fbf2ef] px-3 py-1.5 text-xs font-bold text-[#9b5a57]">{favoriteCount} favorite {favoriteCount === 1 ? "customer" : "customers"}</div></div>
+    <div className="mt-5 grid gap-4 rounded-2xl bg-[#fcf8f6] p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"><div><label htmlFor="favorite-customer-threshold" className="block text-sm font-bold">Favorite customer after</label><p className="mt-1 text-xs text-[#756a6d]">Count confirmed, paid purchases from this business.</p></div><form className="flex items-end gap-2" onSubmit={(event) => { event.preventDefault(); void onSaveThreshold(Number(thresholdInput)); }}><label className="sr-only" htmlFor="favorite-customer-threshold">Number of purchases</label><input id="favorite-customer-threshold" type="number" min={1} max={100} step={1} value={thresholdInput} onChange={(event) => setThresholdInput(event.target.value)} className="h-10 w-24 rounded-xl border border-[#e5d9d5] bg-white px-3 text-sm" /><span className="pb-2 text-xs text-[#756a6d]">purchases</span><button disabled={saving || Number(thresholdInput) === threshold} className="h-10 rounded-xl bg-[#bf6d68] px-4 text-sm font-bold text-white disabled:opacity-50">{saving ? "Saving…" : "Save"}</button></form></div>
+    <label className="mt-5 flex max-w-xl items-center gap-3 rounded-xl border border-[#eee5e1] px-4"><Search size={18} className="shrink-0 text-[#b35f5b]" /><span className="sr-only">Search customers by name, email, or phone</span><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} placeholder="Search name, email, or phone" className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" /></label>
+    <div className="mt-3 divide-y divide-[#eee5e1]">{visibleCustomers.map((customer) => { const favorite = customer.count >= threshold; return <article key={customer.email.toLowerCase()} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:gap-4"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#f4dfda] font-bold text-[#a85855]">{(customer.name !== "Customer" ? customer.name : customer.email).charAt(0).toUpperCase()}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-semibold">{customer.name}</p>{favorite && <span className="inline-flex items-center gap-1 rounded-full bg-[#fff1d7] px-2.5 py-1 text-[11px] font-bold text-[#8c5d12]"><Star size={12} fill="currentColor" />Favorite customer</span>}</div><div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#817679]"><span className="inline-flex items-center gap-1.5"><Mail size={13} />{customer.email}</span>{customer.phone && <span className="inline-flex items-center gap-1.5"><Phone size={13} />{customer.phone}</span>}</div><p className="mt-1 text-xs text-[#817679]">{customer.count} {customer.count === 1 ? "purchase" : "purchases"} · Last purchase {new Date(customer.last).toLocaleDateString()}</p></div><div className="sm:text-right"><p className="text-[11px] font-semibold uppercase tracking-wide text-[#817679]">Total spent</p><strong className="text-sm">BZ${(customer.spent / 100).toFixed(2)}</strong></div></article>; })}{!filtered.length && <Empty text={allCustomers.length ? "No customers match your search." : "Customers appear after they complete a purchase from your store."} />}</div>
+    {pageCount > 1 && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#eee5e1] pt-4"><p className="text-xs text-[#756a6d]">Showing {currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, filtered.length)} of {filtered.length} customers</p><div className="flex items-center gap-2"><button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)} className="inline-flex items-center gap-1 rounded-lg border border-[#e5d9d5] px-3 py-2 text-xs font-bold disabled:opacity-40"><ChevronLeft size={15} />Previous</button><span className="text-xs text-[#756a6d]">Page {currentPage + 1} of {pageCount}</span><button type="button" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)} className="inline-flex items-center gap-1 rounded-lg border border-[#e5d9d5] px-3 py-2 text-xs font-bold disabled:opacity-40">Next<ChevronRight size={15} /></button></div></div>}
+  </Panel>;
 }
 
 function Reviews({ reviews, replies, products, busy, onReply }: { reviews: Review[]; replies: Map<string, string>; products: Map<string, string>; busy: string; onReply: (id: string, body: string) => void }) {

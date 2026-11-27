@@ -153,7 +153,7 @@ begin
     where entry.entry_type = 'payment' and entry.amount_cents < 0
     group by entry.seller_store_id
   )
-  select store.id, store.name, store.status,
+  select store.id, store.name, store.status::text,
     greatest(coalesce(balances.due_cents, 0), 0)::bigint, payment_dates.last_paid
   from public.seller_stores store
   left join balances on balances.seller_store_id = store.id
